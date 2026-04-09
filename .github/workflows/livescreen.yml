@@ -1,0 +1,36 @@
+
+name: Live Screen Bot
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 3:30 AM UTC is 9:00 AM IST
+    # 9:30 AM UTC is 3:00 PM IST
+    # Runs Monday to Friday (1-5)
+    - cron: "30 3-9 * * 1-5"
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install Dependencies
+        run: pip install selenium webdriver-manager mysql-connector-python gspread pandas pytz
+
+      - name: Run Script
+        env:
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          GSPREAD_CREDENTIALS: ${{ secrets.GSPREAD_CREDENTIALS }}
+          TRADINGVIEW_COOKIES: ${{ secrets.TRADINGVIEW_COOKIES }}
+        run: python livescreen.py
