@@ -2,12 +2,18 @@ name: Live Screen Bot
 
 on:
   workflow_dispatch:
+  
+  push:
+    branches: [ main ]
+    paths:
+      - 'livescreen.py'
+      - '.github/workflows/livescreen.yml'
+
   schedule:
     # 1. Triggers at 4:00 AM UTC (9:30 AM IST)
     - cron: "0 4 * * 1-5"
     
-    # 2. Triggers every hour at the top of the hour from 10:30 AM IST to 3:30 PM IST
-    # 5-10 UTC corresponds to 10:30, 11:30, 12:30, 1:30, 2:30, 3:30 PM IST
+    # 2. Triggers every hour from 10:30 AM IST to 3:30 PM IST
     - cron: "0 5-10 * * 1-5"
 
 jobs:
@@ -34,4 +40,6 @@ jobs:
           DB_NAME: ${{ secrets.DB_NAME }}
           GSPREAD_CREDENTIALS: ${{ secrets.GSPREAD_CREDENTIALS }}
           TRADINGVIEW_COOKIES: ${{ secrets.TRADINGVIEW_COOKIES }}
-        run: python livescreen.py
+        run: |
+          echo "Starting Live Screen script..."
+          python livescreen.py
