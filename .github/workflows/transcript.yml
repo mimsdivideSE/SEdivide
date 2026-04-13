@@ -10,6 +10,9 @@ on:
 
   push:
     branches: [ main ]
+    paths:
+      - 'transcript.py'
+      - '.github/workflows/transcript.yml'
 
   schedule:
     - cron: '0 */5 * * *'   # runs every 5 hours
@@ -40,5 +43,5 @@ jobs:
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_NAME: ${{ secrets.DB_NAME }}
         run: |
-          echo "Starting script..."
+          echo "Starting transcript script..."
           python transcript.py "${{ github.event.inputs.target_url || 'https://www.youtube.com/@stockmarketcommando' }}"
