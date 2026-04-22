@@ -20,7 +20,7 @@ STOCK_LIST_URL = "https://docs.google.com/spreadsheets/d/1V8DsH-R3vdUbXqDKZYWHk_
 STOCK_LIST_GID = 1400370843
 SOURCE_TABLE = "wp_live_close"
 TARGET_TABLE = "live_screen"
-CHANGE_THRESHOLD = 7.0 
+CHANGE_THRESHOLD = 5.0 
 
 # ---------------- DRIVER ---------------- #
 def get_optimized_driver():
