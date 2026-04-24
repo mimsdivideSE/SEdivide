@@ -52,13 +52,16 @@ def main():
             user=os.getenv("DB_USER"),
             password=os.getenv("DB_PASSWORD"),
             database=os.getenv("DB_NAME"),
-            autocommit=True # Keep this, but we will call commit explicitly to be safe
+            autocommit=True 
         )
         cur = db_conn.cursor(dictionary=True)
 
-        # ✅ CLEAR OLD DATA
-        print("🧹 Clearing old data...")
-        cur.execute(f"TRUNCATE TABLE `{TARGET_TABLE}`")
+        # ✅ UPDATED: CLEAR ONLY UNTAGGED DATA
+        # Instead of TRUNCATE, we use DELETE to keep rows where tags are present
+        print("🧹 Clearing untagged data...")
+        cleanup_query = f"DELETE FROM `{TARGET_TABLE}` WHERE tags IS NULL OR tags = ''"
+        cur.execute(cleanup_query)
+        print(f"Removed {cur.rowcount} untagged entries. Preserving tagged rows.")
 
         # ---------------- FETCH STOCKS ---------------- #
         cur.execute(f"""
@@ -78,10 +81,8 @@ def main():
         gc = gspread.service_account_from_dict(creds)
         ws = gc.open_by_url(STOCK_LIST_URL).get_worksheet_by_id(STOCK_LIST_GID)
 
-        # Ensure we handle the dataframe indexing safely
         data = ws.get_all_values()
         df = pd.DataFrame(data[1:], columns=data[0]) 
-        # Mapping Symbol (Col A) to URL (Col D)
         url_map = dict(zip(df.iloc[:, 0].str.upper().str.strip(), df.iloc[:, 3]))
 
         # ---------------- BROWSER ---------------- #
@@ -89,7 +90,6 @@ def main():
         driver = get_optimized_driver()
         driver.get("https://www.tradingview.com/")
 
-        # Apply Cookies
         cookies = json.loads(os.getenv("TRADINGVIEW_COOKIES"))
         for c in cookies:
             driver.add_cookie({
@@ -139,7 +139,6 @@ def main():
                     datetime.utcnow()
                 ))
                 
-                # Explicitly commit each record to ensure it is written immediately
                 db_conn.commit()
 
                 print("✅")
@@ -155,7 +154,7 @@ def main():
 
     finally:
         if db_conn and db_conn.is_connected():
-            db_conn.commit() # Final safety commit
+            db_conn.commit() 
             cur.close()
             db_conn.close()
             print("🔌 Database connection closed.")
