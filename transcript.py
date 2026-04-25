@@ -97,30 +97,92 @@ def get_video_data(youtube_url):
         downsub_url = f"https://downsub.com/?url={urllib.parse.quote(youtube_url)}"
         driver.get(downsub_url)
         wait = WebDriverWait(driver, 30)
-        
-        # 1. Wait for and Extract Title
-        # DownSub puts the title inside a card-header b tag
+
+        # -------- TITLE --------
         try:
             title_el = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, ".card-header b")))
             video_title = title_el.text.replace("Download Subtitles", "").strip()
-            # If title is empty or just generic text, try the fallback
             if not video_title or len(video_title) < 3:
                 video_title = driver.title.split('-')[0].strip()
-        except Exception:
-            log("⚠️ Title element not found, attempting fallback...")
+        except:
             video_title = driver.title
 
-        # 2. Handle Download
+        # -------- CLEAR OLD FILES --------
         for f in os.listdir(DOWNLOAD_DIR):
-            try: os.remove(os.path.join(DOWNLOAD_DIR, f))
-            except: pass
+            try:
+                os.remove(os.path.join(DOWNLOAD_DIR, f))
+            except:
+                pass
 
-        txt_xpath = "//button[contains(., 'TXT') or contains(., '[TXT]')]"
-        txt_button = wait.until(EC.element_to_be_clickable((By.XPATH, txt_xpath)))
-        driver.execute_script("arguments[0].click();", txt_button)
-        
-        timeout = 25
+        # ================= STEP 1: CLICK EDIT =================
+        edit_btn = wait.until(EC.element_to_be_clickable((
+            By.XPATH, "//*[@id='app']//button[.//i or contains(., 'Edit')]"
+        )))
+        driver.execute_script("arguments[0].click();", edit_btn)
+        log("✏️ Edit clicked")
+        time.sleep(4)
+
+        # ================= STEP 2: TRANSLATE =================
+        translate_btn = wait.until(EC.element_to_be_clickable((
+            By.XPATH, "//button[contains(., 'Translate')]"
+        )))
+        driver.execute_script("arguments[0].click();", translate_btn)
+        log("🌐 Translate clicked")
+        time.sleep(3)
+
+        # ================= STEP 3: SELECT ENGLISH =================
+        try:
+            eng_option = wait.until(EC.element_to_be_clickable((
+                By.XPATH, "//li[contains(., 'English')] | //option[contains(., 'English')]"
+            )))
+            eng_option.click()
+            log("🇬🇧 English selected")
+        except:
+            log("⚠️ English auto-selected or not found")
+
+        time.sleep(5)
+
+        # ================= STEP 4: DOWNLOAD BUTTON =================
+        download_btn = wait.until(EC.element_to_be_clickable((
+            By.XPATH, "//button[contains(., 'Download')]"
+        )))
+        driver.execute_script("arguments[0].click();", download_btn)
+        log("⬇️ Download popup opened")
+
+        time.sleep(3)
+
+        # ================= STEP 5: POPUP HANDLE =================
+        try:
+            original = wait.until(EC.element_to_be_clickable((
+                By.XPATH, "//div[contains(., 'Original')]"
+            )))
+            driver.execute_script("arguments[0].click();", original)
+            log("☑️ Original unchecked")
+        except:
+            log("⚠️ Original skip")
+
+        try:
+            translated = wait.until(EC.element_to_be_clickable((
+                By.XPATH, "//div[contains(., 'Translation')]"
+            )))
+            driver.execute_script("arguments[0].click();", translated)
+            log("☑️ Translation checked")
+        except:
+            log("⚠️ Translation issue")
+
+        time.sleep(2)
+
+        # ================= STEP 6: FINAL DOWNLOAD =================
+        final_download = wait.until(EC.element_to_be_clickable((
+            By.XPATH, "//button[contains(., 'Download')]"
+        )))
+        driver.execute_script("arguments[0].click();", final_download)
+        log("📥 Final download clicked")
+
+        # -------- WAIT FOR FILE --------
+        timeout = 30
         start_time = time.time()
+
         while time.time() - start_time < timeout:
             files = [f for f in os.listdir(DOWNLOAD_DIR) if f.endswith('.txt')]
             if files:
@@ -130,14 +192,15 @@ def get_video_data(youtube_url):
                     transcript_text = f.read()
                 break
             time.sleep(2)
-            
+
         return video_title, transcript_text
+
     except Exception as e:
         log(f"❌ Error: {e}")
         return video_title, None
+
     finally:
         driver.quit()
-
 def save_to_db(video_id, url, title, content):
     if not DB_CONFIG['host'] or not content: return
     try:
