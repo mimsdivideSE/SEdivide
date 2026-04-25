@@ -1,4 +1,3 @@
-
 import sys
 import time
 import os
@@ -48,62 +47,64 @@ def get_latest_videos(channel_url, count=3):
         clean_url = channel_url.split('?')[0].rstrip('/')
         if not clean_url.endswith('/videos'):
             clean_url += '/videos'
-            
+
         log(f"📺 Fetching videos from: {clean_url}")
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.get(clean_url, headers=headers)
+
         video_ids = re.findall(r'"videoId":"([^"]+)"', response.text)
-        
-        if video_ids:
-            unique_ids = []
-            for vid in video_ids:
-                if vid not in unique_ids:
-                    unique_ids.append(vid)
-            
-            for vid in unique_ids[:count]:
-                video_links.append(f"https://www.youtube.com/watch?v={vid}")
-            log(f"✅ Found {len(video_links)} videos.")
+
+        unique_ids = []
+        for vid in video_ids:
+            if vid not in unique_ids:
+                unique_ids.append(vid)
+
+        for vid in unique_ids[:count]:
+            video_links.append(f"https://www.youtube.com/watch?v={vid}")
+
+        log(f"✅ Found {len(video_links)} videos.")
     except Exception as e:
         log(f"❌ Error fetching videos: {e}")
+
     return video_links
 
+# ---------------- DRIVER ---------------- #
 def create_driver():
     options = Options()
-    options.add_argument("--headless=new")
+
+    # ✅ SHOW BROWSER (IMPORTANT CHANGE)
+    # options.add_argument("--headless=new")  ❌ removed
+
+    options.add_argument("--start-maximized")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--window-size=1920,1080")
-    
+
     prefs = {
         "download.default_directory": DOWNLOAD_DIR,
-        "download.prompt_for_download": False,
-        "download.directory_upgrade": True,
-        "safebrowsing.enabled": True
+        "download.prompt_for_download": False
     }
     options.add_experimental_option("prefs", prefs)
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     driver.execute_cdp_cmd("Page.setDownloadBehavior", {"behavior": "allow", "downloadPath": DOWNLOAD_DIR})
+
     return driver
 
+# ---------------- MAIN LOGIC ---------------- #
 def get_video_data(youtube_url):
     driver = create_driver()
-    video_title = "Unknown Title"
-    transcript_text = None
-    
+    wait = WebDriverWait(driver, 30)
+
     try:
         downsub_url = f"https://downsub.com/?url={urllib.parse.quote(youtube_url)}"
         driver.get(downsub_url)
-        wait = WebDriverWait(driver, 30)
+
+        log("🌐 Opened DownSub")
 
         # -------- TITLE --------
         try:
             title_el = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, ".card-header b")))
             video_title = title_el.text.replace("Download Subtitles", "").strip()
-            if not video_title or len(video_title) < 3:
-                video_title = driver.title.split('-')[0].strip()
         except:
             video_title = driver.title
 
@@ -114,126 +115,130 @@ def get_video_data(youtube_url):
             except:
                 pass
 
-        # ================= STEP 1: CLICK EDIT =================
+        # ================= STEP 1: EDIT =================
         edit_btn = wait.until(EC.element_to_be_clickable((
-            By.XPATH, "//*[@id='app']//button[.//i or contains(., 'Edit')]"
+            By.XPATH, "//button"
         )))
         driver.execute_script("arguments[0].click();", edit_btn)
-        log("✏️ Edit clicked")
-        time.sleep(4)
+        log("✏️ Clicked Edit")
+
+        # ✅ WAIT FOR NEW PAGE
+        wait.until(EC.presence_of_element_located((By.ID, "__nuxt")))
+        log("✅ Editor page loaded")
+        time.sleep(3)
 
         # ================= STEP 2: TRANSLATE =================
         translate_btn = wait.until(EC.element_to_be_clickable((
             By.XPATH, "//button[contains(., 'Translate')]"
         )))
         driver.execute_script("arguments[0].click();", translate_btn)
-        log("🌐 Translate clicked")
+        log("🌐 Clicked Translate")
         time.sleep(3)
 
         # ================= STEP 3: SELECT ENGLISH =================
         try:
-            eng_option = wait.until(EC.element_to_be_clickable((
-                By.XPATH, "//li[contains(., 'English')] | //option[contains(., 'English')]"
+            eng = wait.until(EC.element_to_be_clickable((
+                By.XPATH, "//li[contains(., 'English')]"
             )))
-            eng_option.click()
-            log("🇬🇧 English selected")
+            eng.click()
+            log("🇬🇧 Selected English")
         except:
-            log("⚠️ English auto-selected or not found")
+            log("⚠️ English auto-selected")
 
-        time.sleep(5)
+        time.sleep(4)
 
-        # ================= STEP 4: DOWNLOAD BUTTON =================
+        # ================= STEP 4: DOWNLOAD =================
         download_btn = wait.until(EC.element_to_be_clickable((
             By.XPATH, "//button[contains(., 'Download')]"
         )))
         driver.execute_script("arguments[0].click();", download_btn)
-        log("⬇️ Download popup opened")
+        log("⬇️ Opened download popup")
 
         time.sleep(3)
 
-        # ================= STEP 5: POPUP HANDLE =================
+        # ================= STEP 5: POPUP =================
         try:
             original = wait.until(EC.element_to_be_clickable((
                 By.XPATH, "//div[contains(., 'Original')]"
             )))
-            driver.execute_script("arguments[0].click();", original)
-            log("☑️ Original unchecked")
+            original.click()
+            log("☑️ Unchecked original")
         except:
-            log("⚠️ Original skip")
+            pass
 
         try:
             translated = wait.until(EC.element_to_be_clickable((
                 By.XPATH, "//div[contains(., 'Translation')]"
             )))
-            driver.execute_script("arguments[0].click();", translated)
-            log("☑️ Translation checked")
+            translated.click()
+            log("☑️ Checked translation")
         except:
-            log("⚠️ Translation issue")
+            pass
 
         time.sleep(2)
 
         # ================= STEP 6: FINAL DOWNLOAD =================
-        final_download = wait.until(EC.element_to_be_clickable((
+        final_btn = wait.until(EC.element_to_be_clickable((
             By.XPATH, "//button[contains(., 'Download')]"
         )))
-        driver.execute_script("arguments[0].click();", final_download)
-        log("📥 Final download clicked")
+        final_btn.click()
+        log("📥 Download started")
 
-        # -------- WAIT FOR FILE --------
+        # -------- WAIT FILE --------
         timeout = 30
-        start_time = time.time()
+        start = time.time()
 
-        while time.time() - start_time < timeout:
-            files = [f for f in os.listdir(DOWNLOAD_DIR) if f.endswith('.txt')]
+        while time.time() - start < timeout:
+            files = [f for f in os.listdir(DOWNLOAD_DIR) if f.endswith(".txt")]
             if files:
                 file_path = os.path.join(DOWNLOAD_DIR, files[0])
-                time.sleep(1)
                 with open(file_path, "r", encoding="utf-8") as f:
-                    transcript_text = f.read()
-                break
+                    text = f.read()
+                return video_title, text
             time.sleep(2)
 
-        return video_title, transcript_text
+        return video_title, None
 
     except Exception as e:
-        log(f"❌ Error: {e}")
-        return video_title, None
+        log(f"❌ ERROR: {e}")
+        driver.save_screenshot("debug.png")  # 👈 VERY IMPORTANT
+        return None, None
 
     finally:
         driver.quit()
+
+# ---------------- DB ---------------- #
 def save_to_db(video_id, url, title, content):
-    if not DB_CONFIG['host'] or not content: return
+    if not DB_CONFIG['host'] or not content:
+        return
     try:
         with closing(pymysql.connect(**DB_CONFIG)) as conn:
             with conn.cursor() as cursor:
-                sql = """
-                INSERT INTO wp_transcript (video_id, video_url, title, content) 
-                VALUES (%s, %s, %s, %s) 
-                ON DUPLICATE KEY UPDATE 
-                    title = VALUES(title),
-                    content = VALUES(content)
-                """
-                cursor.execute(sql, (video_id, url, title, content))
+                cursor.execute("""
+                    INSERT INTO wp_transcript (video_id, video_url, title, content)
+                    VALUES (%s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        title = VALUES(title),
+                        content = VALUES(content)
+                """, (video_id, url, title, content))
             conn.commit()
-        log(f"✅ Saved: {title[:50]}...")
+        log(f"✅ Saved: {title[:50]}")
     except Exception as e:
         log(f"❌ DB Error: {e}")
 
+# ---------------- RUN ---------------- #
 if __name__ == "__main__":
     target = sys.argv[1] if len(sys.argv) > 1 else "https://www.youtube.com/@stockmarketcommando"
-    
-    urls_to_process = get_latest_videos(target, count=3) if ("channel" in target or "/@" in target) else [target]
 
-    if not urls_to_process:
-        log("❌ No videos found.")
-        sys.exit(1)
+    urls = get_latest_videos(target, 3)
 
-    for video_url in urls_to_process:
-        log(f"🎬 Processing: {video_url}")
-        vid_id = extract_video_id(video_url)
-        title, text = get_video_data(video_url)
-        
+    for url in urls:
+        log(f"🎬 Processing: {url}")
+        vid = extract_video_id(url)
+
+        title, text = get_video_data(url)
+
         if text:
-            save_to_db(vid_id, video_url, title, text)
-        
+            save_to_db(vid, url, title, text)
+
         time.sleep(2)
