@@ -11,6 +11,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys  # Added for Escape key
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
@@ -62,8 +63,7 @@ def main():
         cur.execute(cleanup_query)
         print(f"Removed {cur.rowcount} untagged entries. Preserving tagged rows.")
 
-        # ---------------- FETCH TOP 50 STOCKS (UPDATED) ---------------- #
-        # Added ORDER BY real_change DESC and LIMIT 50
+        # ---------------- FETCH TOP 50 STOCKS ---------------- #
         print(f"📊 Fetching top 50 stocks with change >= {CHANGE_THRESHOLD}%...")
         query = f"""
             SELECT Symbol, real_close, real_change 
@@ -120,14 +120,21 @@ def main():
 
                 driver.get(url)
 
+                # Wait for chart
                 WebDriverWait(driver, 25).until(
                     EC.presence_of_element_located((By.CLASS_NAME, "chart-container"))
                 )
-                time.sleep(5) 
+                
+                # --- REMOVE POPUPS ---
+                # Sending Escape key to dismiss any active modals or ads
+                driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
+                time.sleep(2) 
+                
+                time.sleep(5) # Final wait for indicators to load
 
                 img_data = driver.get_screenshot_as_png()
 
-                # ---------------- INSERT (UTC TIME) ---------------- #
+                # ---------------- INSERT ---------------- #
                 sql = f"""
                     INSERT INTO `{TARGET_TABLE}` 
                     (symbol, timeframe, real_change, real_close, screenshot, created_at)
