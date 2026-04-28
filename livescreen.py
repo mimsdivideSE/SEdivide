@@ -25,12 +25,12 @@ CHANGE_THRESHOLD = 5.0
 
 # ---------------- HELPERS ---------------- #
 def remove_chart_popups(driver):
-    """Forcefully removes UI overlays via JavaScript."""
+    """Forcefully removes UI overlays/popups via JavaScript for a clean chart."""
     scrub_script = """
     const popupSelectors = [
         '[class^="overlap-"]', '[class*="dialog-"]', '[class*="modal-"]', 
         '.tv-dialog__close', '.js-dialog__close', '[data-role="toast-container"]',
-        '[class*="popup-"]', '#overlap-manager-root'
+        '[class*="popup-"]', '#overlap-manager-root', '.tp-modal', '.tv-ads-banner'
     ];
     popupSelectors.forEach(selector => {
         document.querySelectorAll(selector).forEach(el => el.remove());
@@ -38,6 +38,7 @@ def remove_chart_popups(driver):
     """
     try:
         driver.execute_script(scrub_script)
+        # Backup: Send Escape key to close any remaining modals
         driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
     except:
         pass
@@ -48,7 +49,12 @@ def get_optimized_driver():
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--window-size=1920,1080")
-    return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=opts)
+    
+    driver = webdriver.Chrome(
+        service=Service(ChromeDriverManager().install()),
+        options=opts
+    )
+    return driver
 
 # ---------------- MAIN ---------------- #
 def main():
@@ -59,6 +65,7 @@ def main():
         print(f"🕒 Execution Started at UTC: {datetime.utcnow()}")
 
         # ---------------- DB CONNECTION ---------------- #
+        print("🔗 Connecting to Database...")
         db_conn = mysql.connector.connect(
             host=os.getenv("DB_HOST"),
             user=os.getenv("DB_USER"),
@@ -68,8 +75,14 @@ def main():
         )
         cur = db_conn.cursor(dictionary=True)
 
+        # 1. CLEANUP ALL UNTAGGED DATA FIRST
+        print("🧹 Clearing all untagged data from table...")
+        cleanup_query = f"DELETE FROM `{TARGET_TABLE}` WHERE tags IS NULL OR tags = ''"
+        cur.execute(cleanup_query)
+        print(f"Removed {cur.rowcount} untagged entries. Preserving human-tagged rows.")
+
         # ---------------- FETCH TOP 50 STOCKS ---------------- #
-        print(f"📊 Fetching stocks with change >= {CHANGE_THRESHOLD}%...")
+        print(f"📊 Fetching top 50 stocks with change >= {CHANGE_THRESHOLD}%...")
         query = f"""
             SELECT Symbol, real_close, real_change 
             FROM `{SOURCE_TABLE}` 
@@ -81,19 +94,22 @@ def main():
         stocks = cur.fetchall()
 
         if not stocks:
-            print("😴 No signals found.")
+            print("😴 No stocks found. Terminating.")
             return
 
         # ---------------- LOAD GOOGLE SHEET ---------------- #
         creds = json.loads(os.getenv("GSPREAD_CREDENTIALS"))
         gc = gspread.service_account_from_dict(creds)
         ws = gc.open_by_url(STOCK_LIST_URL).get_worksheet_by_id(STOCK_LIST_GID)
-        df = pd.DataFrame(ws.get_all_values())
-        url_map = dict(zip(df.iloc[1:, 0].str.upper().str.strip(), df.iloc[1:, 3]))
+        data = ws.get_all_values()
+        df = pd.DataFrame(data[1:], columns=data[0]) 
+        url_map = dict(zip(df.iloc[:, 0].str.upper().str.strip(), df.iloc[:, 3]))
 
         # ---------------- BROWSER ---------------- #
+        print(f"🚀 Initializing Browser...")
         driver = get_optimized_driver()
         driver.get("https://www.tradingview.com/")
+
         cookies = json.loads(os.getenv("TRADINGVIEW_COOKIES"))
         for c in cookies:
             driver.add_cookie({"name": c["name"], "value": c["value"], "domain": ".tradingview.com", "path": "/"})
@@ -101,47 +117,53 @@ def main():
 
         success_count = 0
 
-        # ---------------- LOOP ---------------- #
+        # ---------------- CAPTURE LOOP ---------------- #
         for stock in stocks:
             symbol = stock["Symbol"].upper().strip()
             url = url_map.get(symbol)
-            if not url: continue
+            if not url:
+                continue
 
             try:
                 db_conn.ping(reconnect=True, attempts=3, delay=2)
                 
-                # STEP 1: REMOVE EXISTING ENTRY FOR THIS SYMBOL FIRST
-                # This prevents getting "two of the same symbol" in your UI
+                # 2. DELETE SPECIFIC SYMBOL TO PREVENT DUPLICATES IN UI
                 cur.execute(f"DELETE FROM `{TARGET_TABLE}` WHERE symbol = %s", (symbol,))
                 
-                print(f"📸 [{success_count + 1}] Processing {symbol}...", end=" ", flush=True)
+                print(f"📸 [{success_count + 1}/50] Capturing {symbol}...", end=" ", flush=True)
 
                 driver.get(url)
-                WebDriverWait(driver, 25).until(EC.presence_of_element_located((By.CLASS_NAME, "chart-container")))
+
+                # Wait for chart
+                WebDriverWait(driver, 25).until(
+                    EC.presence_of_element_located((By.CLASS_NAME, "chart-container"))
+                )
                 
-                # Wait for popups then clear them
+                # Wait for dynamic popups to appear then scrub them
                 time.sleep(5) 
                 remove_chart_popups(driver)
                 print("✨ (Popups Cleared)", end=" ", flush=True)
-                time.sleep(2)
-
+                
+                time.sleep(2) # Stability wait
                 img_data = driver.get_screenshot_as_png()
 
-                # STEP 2: INSERT THE FRESH SCREENSHOT
+                # 3. INSERT NEW ENTRY
                 sql = f"""
                     INSERT INTO `{TARGET_TABLE}` 
                     (symbol, timeframe, real_change, real_close, screenshot, created_at)
                     VALUES (%s, %s, %s, %s, %s, %s)
                 """
-                cur.execute(sql, (symbol, "day", stock["real_change"], stock["real_close"], img_data, datetime.utcnow()))
+                cur.execute(sql, (
+                    symbol, "day", stock["real_change"], stock["real_close"], img_data, datetime.utcnow()
+                ))
                 
-                print("✅ [Cleaned & Inserted]")
+                print("✅")
                 success_count += 1
 
             except Exception as e:
                 print(f"❌ Error: {str(e)[:50]}")
 
-        print(f"🏁 Done. Total: {success_count}. Duplicates prevented by Delete-Before-Insert logic.")
+        print(f"🏁 Done. Total successful entries: {success_count}")
 
     except Exception as e:
         print(f"🚨 CRITICAL ERROR: {e}")
@@ -150,6 +172,7 @@ def main():
         if db_conn and db_conn.is_connected():
             cur.close()
             db_conn.close()
+            print("🔌 Database connection closed.")
         if driver:
             driver.quit()
 
