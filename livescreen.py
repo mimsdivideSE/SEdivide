@@ -11,7 +11,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys  # Added for Escape key
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
@@ -23,7 +23,28 @@ SOURCE_TABLE = "wp_live_close"
 TARGET_TABLE = "live_screen"
 CHANGE_THRESHOLD = 5.0 
 
-# ---------------- DRIVER ---------------- #
+# ---------------- HELPERS ---------------- #
+def clear_popups(driver):
+    """Forcefully removes common TradingView popup elements using JavaScript."""
+    js_script = """
+    const selectors = [
+        '[class^="overlap-"]', 
+        '[class*="dialog"]', 
+        '[class*="modal"]', 
+        '.tv-dialog__close', 
+        '.js-dialog__close',
+        '[data-role="toast-container"]',
+        '[class*="popup"]'
+    ];
+    selectors.forEach(selector => {
+        document.querySelectorAll(selector).forEach(el => el.remove());
+    });
+    """
+    try:
+        driver.execute_script(js_script)
+    except Exception as e:
+        print(f"⚠️ JS cleanup error: {str(e)[:30]}")
+
 def get_optimized_driver():
     opts = Options()
     opts.add_argument("--headless=new")
@@ -43,11 +64,9 @@ def main():
     db_conn = None
 
     try:
-        # Use UTC for logging
         print(f"🕒 Execution Started at UTC: {datetime.utcnow()}")
 
         # ---------------- DB CONNECTION ---------------- #
-        print("🔗 Connecting to Database...")
         db_conn = mysql.connector.connect(
             host=os.getenv("DB_HOST"),
             user=os.getenv("DB_USER"),
@@ -57,14 +76,7 @@ def main():
         )
         cur = db_conn.cursor(dictionary=True)
 
-        # CLEAR ONLY UNTAGGED DATA
-        print("🧹 Clearing untagged data...")
-        cleanup_query = f"DELETE FROM `{TARGET_TABLE}` WHERE tags IS NULL OR tags = ''"
-        cur.execute(cleanup_query)
-        print(f"Removed {cur.rowcount} untagged entries. Preserving tagged rows.")
-
         # ---------------- FETCH TOP 50 STOCKS ---------------- #
-        print(f"📊 Fetching top 50 stocks with change >= {CHANGE_THRESHOLD}%...")
         query = f"""
             SELECT Symbol, real_close, real_change 
             FROM `{SOURCE_TABLE}` 
@@ -73,35 +85,27 @@ def main():
             LIMIT 50
         """
         cur.execute(query, (CHANGE_THRESHOLD,))
-        
         stocks = cur.fetchall()
 
         if not stocks:
-            print("😴 No signals found. Terminating.")
+            print("😴 No signals found.")
             return
 
         # ---------------- LOAD GOOGLE SHEET ---------------- #
         creds = json.loads(os.getenv("GSPREAD_CREDENTIALS"))
         gc = gspread.service_account_from_dict(creds)
         ws = gc.open_by_url(STOCK_LIST_URL).get_worksheet_by_id(STOCK_LIST_GID)
-
         data = ws.get_all_values()
         df = pd.DataFrame(data[1:], columns=data[0]) 
         url_map = dict(zip(df.iloc[:, 0].str.upper().str.strip(), df.iloc[:, 3]))
 
         # ---------------- BROWSER ---------------- #
-        print(f"🚀 Processing {len(stocks)} stocks...")
         driver = get_optimized_driver()
         driver.get("https://www.tradingview.com/")
 
         cookies = json.loads(os.getenv("TRADINGVIEW_COOKIES"))
         for c in cookies:
-            driver.add_cookie({
-                "name": c["name"],
-                "value": c["value"],
-                "domain": ".tradingview.com",
-                "path": "/"
-            })
+            driver.add_cookie({"name": c["name"], "value": c["value"], "domain": ".tradingview.com", "path": "/"})
         driver.refresh()
 
         success_count = 0
@@ -110,46 +114,33 @@ def main():
         for stock in stocks:
             symbol = stock["Symbol"].upper().strip()
             url = url_map.get(symbol)
-            if not url:
-                print(f"⚠️ No URL for {symbol}")
-                continue
+            if not url: continue
 
             try:
                 db_conn.ping(reconnect=True, attempts=3, delay=2)
-                print(f"📸 [{success_count + 1}/50] Capturing {symbol} ({stock['real_change']}%)...", end=" ", flush=True)
+                print(f"📸 [{success_count + 1}/50] Capturing {symbol}...", end=" ", flush=True)
 
                 driver.get(url)
 
-                # Wait for chart
-                WebDriverWait(driver, 25).until(
+                # Wait for chart load
+                WebDriverWait(driver, 30).until(
                     EC.presence_of_element_located((By.CLASS_NAME, "chart-container"))
                 )
                 
-                # --- REMOVE POPUPS ---
-                # Sending Escape key to dismiss any active modals or ads
-                driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
-                time.sleep(2) 
+                # Wait for any potential popups to trigger
+                time.sleep(4) 
                 
-                time.sleep(5) # Final wait for indicators to load
+                # Execute JS to scrub the screen of popups/modals
+                clear_popups(driver)
+                
+                # Final settle time
+                time.sleep(2)
 
                 img_data = driver.get_screenshot_as_png()
 
                 # ---------------- INSERT ---------------- #
-                sql = f"""
-                    INSERT INTO `{TARGET_TABLE}` 
-                    (symbol, timeframe, real_change, real_close, screenshot, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                """
-
-                cur.execute(sql, (
-                    symbol,
-                    "day",
-                    stock["real_change"],
-                    stock["real_close"],
-                    img_data,
-                    datetime.utcnow()
-                ))
-                
+                sql = f"INSERT INTO `{TARGET_TABLE}` (symbol, timeframe, real_change, real_close, screenshot, created_at) VALUES (%s, %s, %s, %s, %s, %s)"
+                cur.execute(sql, (symbol, "day", stock["real_change"], stock["real_close"], img_data, datetime.utcnow()))
                 db_conn.commit()
 
                 print("✅")
@@ -158,17 +149,15 @@ def main():
             except Exception as e:
                 print(f"❌ Error: {str(e)[:50]}")
 
-        print(f"🏁 Done. Total successful screenshots: {success_count}")
+        print(f"🏁 Done. Total: {success_count}")
 
     except Exception as e:
         print(f"🚨 CRITICAL ERROR: {e}")
 
     finally:
         if db_conn and db_conn.is_connected():
-            db_conn.commit() 
             cur.close()
             db_conn.close()
-            print("🔌 Database connection closed.")
         if driver:
             driver.quit()
 
