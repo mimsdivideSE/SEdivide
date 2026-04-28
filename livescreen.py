@@ -56,19 +56,23 @@ def main():
         )
         cur = db_conn.cursor(dictionary=True)
 
-        # ✅ UPDATED: CLEAR ONLY UNTAGGED DATA
-        # Instead of TRUNCATE, we use DELETE to keep rows where tags are present
+        # CLEAR ONLY UNTAGGED DATA
         print("🧹 Clearing untagged data...")
         cleanup_query = f"DELETE FROM `{TARGET_TABLE}` WHERE tags IS NULL OR tags = ''"
         cur.execute(cleanup_query)
         print(f"Removed {cur.rowcount} untagged entries. Preserving tagged rows.")
 
-        # ---------------- FETCH STOCKS ---------------- #
-        cur.execute(f"""
+        # ---------------- FETCH TOP 50 STOCKS (UPDATED) ---------------- #
+        # Added ORDER BY real_change DESC and LIMIT 50
+        print(f"📊 Fetching top 50 stocks with change >= {CHANGE_THRESHOLD}%...")
+        query = f"""
             SELECT Symbol, real_close, real_change 
             FROM `{SOURCE_TABLE}` 
             WHERE CAST(real_change AS DECIMAL(10,2)) >= %s
-        """, (CHANGE_THRESHOLD,))
+            ORDER BY CAST(real_change AS DECIMAL(10,2)) DESC
+            LIMIT 50
+        """
+        cur.execute(query, (CHANGE_THRESHOLD,))
         
         stocks = cur.fetchall()
 
@@ -112,7 +116,7 @@ def main():
 
             try:
                 db_conn.ping(reconnect=True, attempts=3, delay=2)
-                print(f"📸 Capturing {symbol}...", end=" ", flush=True)
+                print(f"📸 [{success_count + 1}/50] Capturing {symbol} ({stock['real_change']}%)...", end=" ", flush=True)
 
                 driver.get(url)
 
