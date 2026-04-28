@@ -24,26 +24,37 @@ TARGET_TABLE = "live_screen"
 CHANGE_THRESHOLD = 5.0 
 
 # ---------------- HELPERS ---------------- #
-def clear_popups(driver):
-    """Forcefully removes common TradingView popup elements using JavaScript."""
-    js_script = """
-    const selectors = [
+def remove_chart_popups(driver):
+    """
+    Executes JavaScript to identify and remove popup/modal elements 
+    that commonly obstruct TradingView charts.
+    """
+    scrub_script = """
+    const popupSelectors = [
         '[class^="overlap-"]', 
-        '[class*="dialog"]', 
-        '[class*="modal"]', 
+        '[class*="dialog-"]', 
+        '[class*="modal-"]', 
         '.tv-dialog__close', 
         '.js-dialog__close',
         '[data-role="toast-container"]',
-        '[class*="popup"]'
+        '[class*="popup-"]',
+        '.widgetbar-pages',
+        '#overlap-manager-root'
     ];
-    selectors.forEach(selector => {
-        document.querySelectorAll(selector).forEach(el => el.remove());
+    popupSelectors.forEach(selector => {
+        const elements = document.querySelectorAll(selector);
+        elements.forEach(el => {
+            el.style.display = 'none';
+            el.remove();
+        });
     });
     """
     try:
-        driver.execute_script(js_script)
+        driver.execute_script(scrub_script)
+        # Also send an Escape key press as a secondary backup
+        driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
     except Exception as e:
-        print(f"⚠️ JS cleanup error: {str(e)[:30]}")
+        print(f"⚠️ Popup cleanup encountered a minor issue: {str(e)[:30]}")
 
 def get_optimized_driver():
     opts = Options()
@@ -67,6 +78,7 @@ def main():
         print(f"🕒 Execution Started at UTC: {datetime.utcnow()}")
 
         # ---------------- DB CONNECTION ---------------- #
+        print("🔗 Connecting to Database...")
         db_conn = mysql.connector.connect(
             host=os.getenv("DB_HOST"),
             user=os.getenv("DB_USER"),
@@ -76,7 +88,14 @@ def main():
         )
         cur = db_conn.cursor(dictionary=True)
 
+        # CLEAR ONLY UNTAGGED DATA
+        print("🧹 Clearing untagged data...")
+        cleanup_query = f"DELETE FROM `{TARGET_TABLE}` WHERE tags IS NULL OR tags = ''"
+        cur.execute(cleanup_query)
+        print(f"Removed {cur.rowcount} untagged entries.")
+
         # ---------------- FETCH TOP 50 STOCKS ---------------- #
+        print(f"📊 Fetching top 50 stocks with change >= {CHANGE_THRESHOLD}%...")
         query = f"""
             SELECT Symbol, real_close, real_change 
             FROM `{SOURCE_TABLE}` 
@@ -88,7 +107,7 @@ def main():
         stocks = cur.fetchall()
 
         if not stocks:
-            print("😴 No signals found.")
+            print("😴 No signals found. Terminating.")
             return
 
         # ---------------- LOAD GOOGLE SHEET ---------------- #
@@ -99,7 +118,8 @@ def main():
         df = pd.DataFrame(data[1:], columns=data[0]) 
         url_map = dict(zip(df.iloc[:, 0].str.upper().str.strip(), df.iloc[:, 3]))
 
-        # ---------------- BROWSER ---------------- #
+        # ---------------- BROWSER INITIALIZATION ---------------- #
+        print(f"🚀 Initializing Browser for {len(stocks)} stocks...")
         driver = get_optimized_driver()
         driver.get("https://www.tradingview.com/")
 
@@ -110,46 +130,61 @@ def main():
 
         success_count = 0
 
-        # ---------------- LOOP ---------------- #
+        # ---------------- CAPTURE LOOP ---------------- #
         for stock in stocks:
             symbol = stock["Symbol"].upper().strip()
             url = url_map.get(symbol)
-            if not url: continue
+            if not url:
+                print(f"⚠️ No URL for {symbol}")
+                continue
 
             try:
                 db_conn.ping(reconnect=True, attempts=3, delay=2)
-                print(f"📸 [{success_count + 1}/50] Capturing {symbol}...", end=" ", flush=True)
+                print(f"📸 [{success_count + 1}/50] Processing {symbol}...", end=" ", flush=True)
 
                 driver.get(url)
 
-                # Wait for chart load
-                WebDriverWait(driver, 30).until(
+                # Wait for the chart to exist
+                WebDriverWait(driver, 25).until(
                     EC.presence_of_element_located((By.CLASS_NAME, "chart-container"))
                 )
                 
-                # Wait for any potential popups to trigger
+                # Give popups a moment to appear
                 time.sleep(4) 
                 
-                # Execute JS to scrub the screen of popups/modals
-                clear_popups(driver)
+                # Forcefully remove any overlays/popups via JS
+                remove_chart_popups(driver)
+                print("✨ (Popups Cleared)", end=" ", flush=True)
                 
-                # Final settle time
+                # Brief wait for UI stability after cleanup
                 time.sleep(2)
 
                 img_data = driver.get_screenshot_as_png()
 
-                # ---------------- INSERT ---------------- #
-                sql = f"INSERT INTO `{TARGET_TABLE}` (symbol, timeframe, real_change, real_close, screenshot, created_at) VALUES (%s, %s, %s, %s, %s, %s)"
-                cur.execute(sql, (symbol, "day", stock["real_change"], stock["real_close"], img_data, datetime.utcnow()))
-                db_conn.commit()
+                # ---------------- DATABASE INSERT ---------------- #
+                sql = f"""
+                    INSERT INTO `{TARGET_TABLE}` 
+                    (symbol, timeframe, real_change, real_close, screenshot, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """
 
+                cur.execute(sql, (
+                    symbol,
+                    "day",
+                    stock["real_change"],
+                    stock["real_close"],
+                    img_data,
+                    datetime.utcnow()
+                ))
+                
+                db_conn.commit()
                 print("✅")
                 success_count += 1
 
             except Exception as e:
                 print(f"❌ Error: {str(e)[:50]}")
 
-        print(f"🏁 Done. Total: {success_count}")
+        print(f"🏁 Done. Total successful screenshots: {success_count}")
 
     except Exception as e:
         print(f"🚨 CRITICAL ERROR: {e}")
@@ -158,6 +193,7 @@ def main():
         if db_conn and db_conn.is_connected():
             cur.close()
             db_conn.close()
+            print("🔌 Database connection closed.")
         if driver:
             driver.quit()
 
