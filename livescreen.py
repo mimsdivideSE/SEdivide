@@ -16,19 +16,20 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 
+
 # ---------------- CONFIG ---------------- #
-STOCK_LIST_URL = "https://docs.google.com/spreadsheets/d/1V8DsH-R3vdUbXqDKZYWHk_8T0VRjqTEVyj7PhlIDtG4/edit#gid=0"
+# STOCK_LIST_URL = "https://docs.google.com/spreadsheets/d/1V8DsH-R3vdUbXqDKZYWHk_8T0VRjqTEVyj7PhlIDtG4/edit#gid=0"
 STOCK_LIST_GID = 1400370843
 SOURCE_TABLE = "wp_live_close"
 TARGET_TABLE = "live_screen"
-CHANGE_THRESHOLD = 5.0 
+CHANGE_THRESHOLD = 5.0
+
 
 # ---------------- HELPERS ---------------- #
 def remove_chart_popups(driver):
-    """Forcefully removes UI overlays/popups via JavaScript for a clean chart."""
     scrub_script = """
     const popupSelectors = [
-        '[class^="overlap-"]', '[class*="dialog-"]', '[class*="modal-"]', 
+        '[class^="overlap-"]', '[class*="dialog-"]', '[class*="modal-"]',
         '.tv-dialog__close', '.js-dialog__close', '[data-role="toast-container"]',
         '[class*="popup-"]', '#overlap-manager-root', '.tp-modal', '.tv-ads-banner'
     ];
@@ -38,10 +39,10 @@ def remove_chart_popups(driver):
     """
     try:
         driver.execute_script(scrub_script)
-        # Backup: Send Escape key to close any remaining modals
         driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
     except:
         pass
+
 
 def get_optimized_driver():
     opts = Options()
@@ -49,12 +50,13 @@ def get_optimized_driver():
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--window-size=1920,1080")
-    
+
     driver = webdriver.Chrome(
         service=Service(ChromeDriverManager().install()),
         options=opts
     )
     return driver
+
 
 # ---------------- MAIN ---------------- #
 def main():
@@ -71,7 +73,7 @@ def main():
             user=os.getenv("DB_USER"),
             password=os.getenv("DB_PASSWORD"),
             database=os.getenv("DB_NAME"),
-            autocommit=True 
+            autocommit=True
         )
         cur = db_conn.cursor(dictionary=True)
 
@@ -102,8 +104,22 @@ def main():
         gc = gspread.service_account_from_dict(creds)
         ws = gc.open_by_url(STOCK_LIST_URL).get_worksheet_by_id(STOCK_LIST_GID)
         data = ws.get_all_values()
-        df = pd.DataFrame(data[1:], columns=data[0]) 
-        url_map = dict(zip(df.iloc[:, 0].str.upper().str.strip(), df.iloc[:, 3]))
+        df = pd.DataFrame(data[1:], columns=data[0])
+
+        # 🔥 UPDATED: HANDLE COLUMN C + D
+        url_map = {}
+        for _, row in df.iterrows():
+            symbol = row.iloc[0].strip().upper()
+            urls = []
+
+            if len(row) > 2 and row.iloc[2]:
+                urls.append(("day", row.iloc[2]))
+
+            if len(row) > 3 and row.iloc[3]:
+                urls.append(("week", row.iloc[3]))
+
+            if urls:
+                url_map[symbol] = urls
 
         # ---------------- BROWSER ---------------- #
         print(f"🚀 Initializing Browser...")
@@ -112,7 +128,12 @@ def main():
 
         cookies = json.loads(os.getenv("TRADINGVIEW_COOKIES"))
         for c in cookies:
-            driver.add_cookie({"name": c["name"], "value": c["value"], "domain": ".tradingview.com", "path": "/"})
+            driver.add_cookie({
+                "name": c["name"],
+                "value": c["value"],
+                "domain": ".tradingview.com",
+                "path": "/"
+            })
         driver.refresh()
 
         success_count = 0
@@ -120,48 +141,56 @@ def main():
         # ---------------- CAPTURE LOOP ---------------- #
         for stock in stocks:
             symbol = stock["Symbol"].upper().strip()
-            url = url_map.get(symbol)
-            if not url:
+            urls = url_map.get(symbol)
+
+            if not urls:
                 continue
 
-            try:
-                db_conn.ping(reconnect=True, attempts=3, delay=2)
-                
-                # 2. DELETE SPECIFIC SYMBOL TO PREVENT DUPLICATES IN UI
-                cur.execute(f"DELETE FROM `{TARGET_TABLE}` WHERE symbol = %s", (symbol,))
-                
-                print(f"📸 [{success_count + 1}/50] Capturing {symbol}...", end=" ", flush=True)
+            for timeframe, url in urls:
+                try:
+                    db_conn.ping(reconnect=True, attempts=3, delay=2)
 
-                driver.get(url)
+                    # delete only same symbol + timeframe
+                    cur.execute(
+                        f"DELETE FROM `{TARGET_TABLE}` WHERE symbol = %s AND timeframe = %s",
+                        (symbol, timeframe)
+                    )
 
-                # Wait for chart
-                WebDriverWait(driver, 25).until(
-                    EC.presence_of_element_located((By.CLASS_NAME, "chart-container"))
-                )
-                
-                # Wait for dynamic popups to appear then scrub them
-                time.sleep(5) 
-                remove_chart_popups(driver)
-                print("✨ (Popups Cleared)", end=" ", flush=True)
-                
-                time.sleep(2) # Stability wait
-                img_data = driver.get_screenshot_as_png()
+                    print(f"📸 [{success_count + 1}/50] Capturing {symbol} [{timeframe}]...", end=" ", flush=True)
 
-                # 3. INSERT NEW ENTRY
-                sql = f"""
-                    INSERT INTO `{TARGET_TABLE}` 
-                    (symbol, timeframe, real_change, real_close, screenshot, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                """
-                cur.execute(sql, (
-                    symbol, "day", stock["real_change"], stock["real_close"], img_data, datetime.utcnow()
-                ))
-                
-                print("✅")
-                success_count += 1
+                    driver.get(url)
 
-            except Exception as e:
-                print(f"❌ Error: {str(e)[:50]}")
+                    WebDriverWait(driver, 25).until(
+                        EC.presence_of_element_located((By.CLASS_NAME, "chart-container"))
+                    )
+
+                    time.sleep(5)
+                    remove_chart_popups(driver)
+                    print("✨ (Popups Cleared)", end=" ", flush=True)
+
+                    time.sleep(2)
+                    img_data = driver.get_screenshot_as_png()
+
+                    sql = f"""
+                        INSERT INTO `{TARGET_TABLE}` 
+                        (symbol, timeframe, real_change, real_close, screenshot, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    """
+
+                    cur.execute(sql, (
+                        symbol,
+                        timeframe,
+                        stock["real_change"],
+                        stock["real_close"],
+                        img_data,
+                        datetime.utcnow()
+                    ))
+
+                    print("✅")
+                    success_count += 1
+
+                except Exception as e:
+                    print(f"❌ Error {symbol} [{timeframe}]: {str(e)[:50]}")
 
         print(f"🏁 Done. Total successful entries: {success_count}")
 
@@ -175,6 +204,7 @@ def main():
             print("🔌 Database connection closed.")
         if driver:
             driver.quit()
+
 
 if __name__ == "__main__":
     main()
