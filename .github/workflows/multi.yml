@@ -87,22 +87,6 @@ jobs:
 
 
       # =====================================================
-      # CACHE PIP
-      # =====================================================
-
-      - name: Cache Pip Packages
-        uses: actions/cache@v4
-
-        with:
-          path: ~/.cache/pip
-
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-
-      # =====================================================
       # INSTALL PYTHON DEPENDENCIES
       # =====================================================
 
@@ -152,7 +136,7 @@ jobs:
           echo "STARTING MULTI CHANNEL SCRAPER"
           echo "======================================"
 
-          python transcript.py
+          python multi.py
 
           echo "======================================"
           echo "SCRAPER FINISHED"
@@ -171,3 +155,4 @@ jobs:
           rm -rf downloads || true
 
           echo "Cleanup completed"
+
