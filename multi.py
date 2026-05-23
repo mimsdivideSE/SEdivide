@@ -57,6 +57,50 @@ def log(message):
 
 
 # =========================================================
+# DATABASE CONNECTION
+# =========================================================
+
+def get_connection():
+
+    return pymysql.connect(
+        **DB_CONFIG,
+        cursorclass=pymysql.cursors.DictCursor
+    )
+
+
+# =========================================================
+# GET CHANNELS FROM DATABASE
+# =========================================================
+
+def get_channels():
+
+    try:
+
+        with closing(get_connection()) as conn:
+
+            with conn.cursor() as cursor:
+
+                sql = """
+                SELECT *
+                FROM youtube_channels
+                WHERE active = 1
+                ORDER BY id ASC
+                """
+
+                cursor.execute(sql)
+
+                rows = cursor.fetchall()
+
+                return rows
+
+    except Exception as e:
+
+        log(f"❌ Channel Fetch Error: {e}")
+
+        return []
+
+
+# =========================================================
 # EXTRACT VIDEO ID
 # =========================================================
 
@@ -77,49 +121,6 @@ def extract_video_id(url):
 
 
 # =========================================================
-# DATABASE CONNECTION
-# =========================================================
-
-def get_connection():
-
-    return pymysql.connect(
-        **DB_CONFIG,
-        cursorclass=pymysql.cursors.DictCursor
-    )
-
-
-# =========================================================
-# GET ACTIVE CHANNELS
-# =========================================================
-
-def get_channels():
-
-    try:
-
-        with closing(get_connection()) as conn:
-
-            with conn.cursor() as cursor:
-
-                sql = """
-                SELECT *
-                FROM youtube_channels
-                WHERE active = 1
-                """
-
-                cursor.execute(sql)
-
-                rows = cursor.fetchall()
-
-                return rows
-
-    except Exception as e:
-
-        log(f"❌ Channel Fetch Error: {e}")
-
-        return []
-
-
-# =========================================================
 # GET LATEST VIDEOS
 # =========================================================
 
@@ -134,7 +135,7 @@ def get_latest_videos(channel_url, limit=3):
         if not clean_url.endswith('/videos'):
             clean_url += '/videos'
 
-        log(f"📺 Fetching: {clean_url}")
+        log(f"📺 Fetching videos from: {clean_url}")
 
         headers = {
             "User-Agent": "Mozilla/5.0"
@@ -277,15 +278,9 @@ def get_video_data(video_url):
             + urllib.parse.quote(video_url)
         )
 
-        log(f"🌐 Opening DownSub")
-
         driver.get(downsub_url)
 
         wait = WebDriverWait(driver, 30)
-
-        # =================================================
-        # GET TITLE
-        # =================================================
 
         try:
 
@@ -315,15 +310,7 @@ def get_video_data(video_url):
 
             title = driver.title
 
-        # =================================================
-        # CLEAN DOWNLOADS
-        # =================================================
-
         clean_downloads()
-
-        # =================================================
-        # CLICK TXT BUTTON
-        # =================================================
 
         txt_xpath = (
             "//button[contains(., 'TXT') "
@@ -342,10 +329,6 @@ def get_video_data(video_url):
             "arguments[0].click();",
             txt_button
         )
-
-        # =================================================
-        # WAIT FOR TXT FILE
-        # =================================================
 
         timeout = 30
 
@@ -396,7 +379,7 @@ def get_video_data(video_url):
 
 
 # =========================================================
-# SAVE TO DATABASE
+# SAVE TRANSCRIPT
 # =========================================================
 
 def save_transcript(
@@ -478,9 +461,11 @@ if __name__ == "__main__":
 
     if not channels:
 
-        log("❌ No active channels found")
+        log("❌ No active channels found in database")
 
         exit()
+
+    log(f"✅ Total Active Channels: {len(channels)}")
 
     for channel in channels:
 
@@ -494,9 +479,10 @@ if __name__ == "__main__":
 
             limit = channel['latest_video_limit']
 
-            log(f"\n==============================")
+            log("\n===================================")
             log(f"📡 CHANNEL: {channel_name}")
-            log(f"==============================")
+            log(f"🌐 URL: {channel_url}")
+            log("===================================")
 
             videos = get_latest_videos(
                 channel_url,
@@ -522,7 +508,7 @@ if __name__ == "__main__":
 
                     if not video_id:
 
-                        log("❌ Invalid Video ID")
+                        log("❌ Invalid video ID")
 
                         continue
 
@@ -545,7 +531,7 @@ if __name__ == "__main__":
 
                     else:
 
-                        log("❌ Empty Transcript")
+                        log("❌ Empty transcript")
 
                     time.sleep(2)
 
