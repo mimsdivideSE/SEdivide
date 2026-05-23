@@ -1,15 +1,14 @@
-name: Fetch Latest 3 Transcripts
+```yaml
+name: Multi Channel Transcript Scraper
 
 on:
+
   workflow_dispatch:
-    inputs:
-      target_url:
-        description: 'YouTube Channel or Video URL'
-        required: true
-        default: 'https://www.youtube.com/@stockmarketcommando'
 
   push:
-    branches: [ main ]
+    branches:
+      - main
+
     paths:
       - 'transcript.py'
       - '.github/workflows/transcript.yml'
@@ -17,28 +16,57 @@ on:
   schedule:
     - cron: '0 */5 * * *'
 
+
 jobs:
+
   scrape:
+
     runs-on: ubuntu-latest
 
+    timeout-minutes: 360
+
     steps:
-      - name: Checkout Code
+
+      # =====================================================
+      # CHECKOUT
+      # =====================================================
+
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+
+      # =====================================================
+      # PYTHON
+      # =====================================================
+
+      - name: Setup Python
         uses: actions/setup-python@v5
+
         with:
           python-version: '3.10'
 
-      # ---------------- INSTALL CHROME ---------------- #
-      - name: Install Chrome & System Dependencies
+
+      # =====================================================
+      # INSTALL GOOGLE CHROME
+      # =====================================================
+
+      - name: Install Chrome
         run: |
+
           sudo apt-get update
 
           wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+
           sudo apt install -y ./google-chrome-stable_current_amd64.deb
 
-          # ✅ FIXED PACKAGE LIST
+
+      # =====================================================
+      # INSTALL SYSTEM DEPENDENCIES
+      # =====================================================
+
+      - name: Install Linux Dependencies
+        run: |
+
           sudo apt-get install -y \
             fonts-liberation \
             libappindicator3-1 \
@@ -54,31 +82,93 @@ jobs:
             libxcomposite1 \
             libxdamage1 \
             libxrandr2 \
-            xdg-utils
+            xdg-utils \
+            unzip
 
-      # ---------------- PYTHON DEPENDENCIES ---------------- #
+
+      # =====================================================
+      # CACHE PIP
+      # =====================================================
+
+      - name: Cache Pip Packages
+        uses: actions/cache@v4
+
+        with:
+          path: ~/.cache/pip
+
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+
+      # =====================================================
+      # INSTALL PYTHON DEPENDENCIES
+      # =====================================================
+
       - name: Install Python Dependencies
         run: |
-          pip install --upgrade pip
+
+          python -m pip install --upgrade pip
+
           pip install \
             selenium \
             webdriver-manager \
             pymysql \
-            requests \
-            beautifulsoup4 \
-            lxml \
-            googletrans==4.0.0-rc1
+            requests
 
-      - name: Show Installed Packages
-        run: pip list
 
-      # ---------------- RUN SCRIPT ---------------- #
-      - name: Run Scraper
+      # =====================================================
+      # SHOW VERSIONS
+      # =====================================================
+
+      - name: Show Python Version
+        run: python --version
+
+
+      - name: Show Chrome Version
+        run: google-chrome --version
+
+
+      # =====================================================
+      # RUN SCRIPT
+      # =====================================================
+
+      - name: Run Transcript Scraper
+
         env:
+
           DB_HOST: ${{ secrets.DB_HOST }}
+
           DB_USER: ${{ secrets.DB_USER }}
+
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+
           DB_NAME: ${{ secrets.DB_NAME }}
+
         run: |
-          echo "Starting transcript script..."
-          python transcript.py "${{ github.event.inputs.target_url || 'https://www.youtube.com/@stockmarketcommando' }}"
+
+          echo "======================================"
+          echo "STARTING MULTI CHANNEL SCRAPER"
+          echo "======================================"
+
+          python mutli.py
+
+          echo "======================================"
+          echo "SCRAPER FINISHED"
+          echo "======================================"
+
+
+      # =====================================================
+      # CLEANUP
+      # =====================================================
+
+      - name: Cleanup Downloads
+        if: always()
+
+        run: |
+
+          rm -rf downloads || true
+
+          echo "Cleanup completed"
+
