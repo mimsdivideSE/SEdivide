@@ -1,8 +1,18 @@
+# =========================================================
+# STOCKEDGE LATEST NEWS SCRAPER
+# ONLY BUY + WATCHLIST SYMBOLS
+# FETCH LATEST NEWS
+# NO DATE FILTER
+# NO DUPLICATES
+# GITHUB ACTIONS OPTIMIZED
+# =========================================================
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 import mysql.connector
 from datetime import datetime
@@ -77,6 +87,7 @@ chrome_options.add_argument("--disable-gpu")
 chrome_options.add_argument("--disable-extensions")
 chrome_options.add_argument("--disable-infobars")
 chrome_options.add_argument("--disable-popup-blocking")
+chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
 chrome_options.page_load_strategy = "eager"
 
@@ -124,15 +135,16 @@ for index, stock in enumerate(stocks, start=1):
 
         driver.get("https://search.stockedge.com/")
 
-        time.sleep(1)
+        # Explicitly wait for search input box
+        search_box = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.ID, "searchText"))
+        )
 
         # =================================================
         # SEARCH SYMBOL
         # =================================================
 
         print(f"🔍 Searching: {symbol}")
-
-        search_box = driver.find_element(By.ID, "searchText")
 
         search_box.clear()
 
@@ -142,17 +154,14 @@ for index, stock in enumerate(stocks, start=1):
 
         search_box.send_keys(Keys.ENTER)
 
-        time.sleep(2)
-
         # =================================================
         # GET FIRST RESULT
         # =================================================
 
         print("📄 Getting stock URL...")
 
-        first_result = driver.find_element(
-            By.CSS_SELECTOR,
-            ".response-table tr td span.entity_name"
+        first_result = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, ".response-table tr td span.entity_name"))
         )
 
         parent_td = first_result.find_element(
@@ -172,7 +181,7 @@ for index, stock in enumerate(stocks, start=1):
 
             continue
 
-        print("✅ Stock URL Found")
+        print(f"✅ Stock URL Found: {stock_url}")
 
         # =================================================
         # OPEN FEEDS PAGE
@@ -180,11 +189,19 @@ for index, stock in enumerate(stocks, start=1):
 
         feed_url = stock_url + "?section=feeds"
 
-        print("📰 Opening feeds page...")
+        print(f"📰 Opening feeds page: {feed_url}")
 
         driver.get(feed_url)
 
-        time.sleep(2)
+        # Wait dynamic time for feed content inside Ionic blocks to render
+        try:
+            WebDriverWait(driver, 15).until(
+                EC.presence_of_element_located((By.TAG_NAME, "ion-item"))
+            )
+            # Short buffer for inner texts to complete hydration
+            time.sleep(1.5)
+        except:
+            print("⏳ Timeout waiting for news feeds DOM setup")
 
         # =================================================
         # GET FEED ITEMS
@@ -249,7 +266,7 @@ for index, stock in enumerate(stocks, start=1):
                     "p"
                 ).text.strip()
 
-                if not headline:
+                if not headline or headline.strip() == "":
                     continue
 
                 print(f"\n📰 Latest News #{item_index}")
@@ -350,4 +367,3 @@ conn.close()
 print("\n✅ Browser Closed")
 print("✅ MySQL Closed")
 print("✅ Script Completed")
-
