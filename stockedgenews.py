@@ -1,10 +1,4 @@
 
-# =========================================================
-# STOCKEDGE TODAY NEWS SCRAPER
-# ONLY BUY + WATCHLIST SYMBOLS
-# STORE "No updates today" IF NO NEWS
-# =========================================================
-
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -14,6 +8,13 @@ import mysql.connector
 from datetime import datetime
 import time
 import os
+import sys
+
+# =========================================================
+# LIVE LOGS FOR GITHUB ACTIONS
+# =========================================================
+
+sys.stdout.reconfigure(line_buffering=True)
 
 # =========================================================
 # MYSQL CONFIG
@@ -24,7 +25,8 @@ DB_CONFIG = {
     "user": os.getenv("DB_USER"),
     "password": os.getenv("DB_PASSWORD"),
     "database": os.getenv("DB_NAME"),
-    "autocommit": True
+    "autocommit": True,
+    "connection_timeout": 300
 }
 
 # =========================================================
@@ -51,6 +53,7 @@ FROM filter
 WHERE review_status IN ('buy', 'watchlist')
 AND symbol IS NOT NULL
 AND symbol != ''
+ORDER BY symbol ASC
 """
 
 cursor.execute(query)
@@ -78,10 +81,20 @@ chrome_options.add_argument("--no-sandbox")
 chrome_options.add_argument("--disable-dev-shm-usage")
 chrome_options.add_argument("--disable-blink-features=AutomationControlled")
 chrome_options.add_argument("--window-size=1920,1080")
+chrome_options.add_argument("--disable-gpu")
+chrome_options.add_argument("--disable-extensions")
+chrome_options.add_argument("--disable-infobars")
+chrome_options.add_argument("--disable-popup-blocking")
+
+# FASTER PAGE LOADS
+chrome_options.page_load_strategy = "eager"
 
 print("\n🚀 Starting Chrome...")
 
 driver = webdriver.Chrome(options=chrome_options)
+
+# PAGE TIMEOUT
+driver.set_page_load_timeout(30)
 
 print("✅ Chrome Started")
 
@@ -91,6 +104,7 @@ print("✅ Chrome Started")
 
 total_saved = 0
 total_duplicates = 0
+total_errors = 0
 
 # =========================================================
 # LOOP SYMBOLS
@@ -98,7 +112,7 @@ total_duplicates = 0
 
 for index, stock in enumerate(stocks, start=1):
 
-    symbol = stock["symbol"]
+    symbol = stock["symbol"].strip()
 
     print("\n================================================")
     print(f"📊 [{index}/{len(stocks)}] {symbol}")
@@ -109,8 +123,16 @@ for index, stock in enumerate(stocks, start=1):
     try:
 
         # =================================================
+        # KEEP MYSQL CONNECTION ALIVE
+        # =================================================
+
+        conn.ping(reconnect=True, attempts=3, delay=2)
+
+        # =================================================
         # OPEN STOCKEDGE SEARCH
         # =================================================
+
+        print("🌐 Opening StockEdge Search...")
 
         driver.get("https://search.stockedge.com/")
 
@@ -120,13 +142,15 @@ for index, stock in enumerate(stocks, start=1):
         # SEARCH SYMBOL
         # =================================================
 
+        print(f"🔍 Searching: {symbol}")
+
         search_box = driver.find_element(By.ID, "searchText")
 
         search_box.clear()
 
         search_box.send_keys(symbol)
 
-        time.sleep(1)
+        time.sleep(0.5)
 
         search_box.send_keys(Keys.ENTER)
 
@@ -135,6 +159,8 @@ for index, stock in enumerate(stocks, start=1):
         # =================================================
         # GET FIRST RESULT
         # =================================================
+
+        print("📄 Getting stock URL...")
 
         first_result = driver.find_element(
             By.CSS_SELECTOR,
@@ -154,7 +180,11 @@ for index, stock in enumerate(stocks, start=1):
 
             print("❌ No stock URL found")
 
+            total_errors += 1
+
             continue
+
+        print("✅ Stock URL Found")
 
         # =================================================
         # OPEN FEEDS PAGE
@@ -169,7 +199,7 @@ for index, stock in enumerate(stocks, start=1):
         time.sleep(2)
 
         # =================================================
-        # GET FEEDS
+        # GET FEED ITEMS
         # =================================================
 
         feed_items = driver.find_elements(By.TAG_NAME, "ion-item")
@@ -177,12 +207,18 @@ for index, stock in enumerate(stocks, start=1):
         print(f"📰 Feed Items Found: {len(feed_items)}")
 
         # =================================================
-        # PROCESS TODAY NEWS ONLY
+        # PROCESS FEEDS
         # =================================================
 
-        for item in feed_items:
+        for item_index, item in enumerate(feed_items, start=1):
 
             try:
+
+                # =========================================
+                # KEEP MYSQL ALIVE
+                # =========================================
+
+                conn.ping(reconnect=True, attempts=3, delay=2)
 
                 # =========================================
                 # GET DATE
@@ -205,7 +241,7 @@ for index, stock in enumerate(stocks, start=1):
                 if log_date != today_date:
 
                     print(f"⏭ Older News Found: {log_date}")
-                    print("🛑 Stopping")
+                    print("🛑 Stopping Feed Processing")
 
                     break
 
@@ -227,7 +263,9 @@ for index, stock in enumerate(stocks, start=1):
                 if not headline:
                     continue
 
-                print(f"\n📰 {headline}")
+                print(f"\n📰 Feed #{item_index}")
+                print(f"📅 {log_date}")
+                print(f"📝 {headline[:150]}")
 
                 # =========================================
                 # CHECK DUPLICATE
@@ -286,7 +324,7 @@ for index, stock in enumerate(stocks, start=1):
 
                 total_saved += 1
 
-                print("✅ Saved")
+                print("✅ Saved Successfully")
 
             except Exception as feed_error:
 
@@ -303,10 +341,6 @@ for index, stock in enumerate(stocks, start=1):
             print("📭 No news today")
 
             no_news_text = "No updates today"
-
-            # =============================================
-            # CHECK DUPLICATE
-            # =============================================
 
             check_query = """
             SELECT id
@@ -329,6 +363,8 @@ for index, stock in enumerate(stocks, start=1):
             exists = cursor.fetchone()
 
             if exists:
+
+                total_duplicates += 1
 
                 print("⚠ No-update entry already exists")
 
@@ -357,7 +393,11 @@ for index, stock in enumerate(stocks, start=1):
 
                 print("✅ Stored: No updates today")
 
+        print(f"✅ Completed: {symbol}")
+
     except Exception as stock_error:
+
+        total_errors += 1
 
         print(f"❌ Stock Error: {stock_error}")
 
@@ -367,18 +407,21 @@ for index, stock in enumerate(stocks, start=1):
 # CLOSE EVERYTHING
 # =========================================================
 
-driver.quit()
-
-cursor.close()
-
-conn.close()
-
 print("\n================================================")
 print("🎯 FINAL SUMMARY")
 print("================================================")
 
 print(f"✅ Total Saved: {total_saved}")
 print(f"⚠ Total Duplicates: {total_duplicates}")
+print(f"❌ Total Errors: {total_errors}")
 
-print("\n✅ Script Completed")
+driver.quit()
+
+cursor.close()
+
+conn.close()
+
+print("\n✅ Browser Closed")
+print("✅ MySQL Closed")
+print("✅ Script Completed")
 
