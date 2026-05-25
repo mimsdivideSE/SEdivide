@@ -1,27 +1,23 @@
-
+```python
 # =========================================================
-# STOCKEDGE NEWS SCRAPER + MYSQL STORAGE
-# PRODUCTION SAFE VERSION
+# STOCKEDGE TODAY NEWS SCRAPER
+# ONLY BUY + WATCHLIST SYMBOLS
+# ONLY TODAY NEWS
+# SAVE INTO wp_terminal_news_archive
 # =========================================================
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-
-from webdriver_manager.chrome import ChromeDriverManager
 
 import mysql.connector
-from mysql.connector import Error
-
 from datetime import datetime
 import time
 import os
-import traceback
 
 # =========================================================
-# DATABASE CONFIG
+# MYSQL CONFIG
 # =========================================================
 
 DB_CONFIG = {
@@ -29,52 +25,26 @@ DB_CONFIG = {
     "user": os.getenv("DB_USER"),
     "password": os.getenv("DB_PASSWORD"),
     "database": os.getenv("DB_NAME"),
-
-    # IMPORTANT
-    "connection_timeout": 600,
     "autocommit": True
 }
 
 # =========================================================
-# MYSQL CONNECT FUNCTION
+# CONNECT MYSQL
 # =========================================================
 
-def connect_mysql():
+print("🔌 Connecting MySQL...")
 
-    try:
-
-        print("\n🔌 Connecting MySQL...")
-
-        conn = mysql.connector.connect(**DB_CONFIG)
-
-        if conn.is_connected():
-
-            print("✅ MySQL Connected Successfully")
-
-            return conn
-
-    except Error as e:
-
-        print(f"❌ MySQL Connection Error: {e}")
-
-        return None
-
-# =========================================================
-# CREATE MYSQL CONNECTION
-# =========================================================
-
-conn = connect_mysql()
-
-if not conn:
-    raise Exception("Database connection failed")
+conn = mysql.connector.connect(**DB_CONFIG)
 
 cursor = conn.cursor(dictionary=True)
 
+print("✅ MySQL Connected")
+
 # =========================================================
-# GET SYMBOLS
+# GET BUY + WATCHLIST SYMBOLS
 # =========================================================
 
-print("\n📥 Fetching BUY/WATCHLIST symbols...")
+print("\n📥 Fetching symbols...")
 
 query = """
 SELECT DISTINCT symbol
@@ -91,10 +61,16 @@ stocks = cursor.fetchall()
 print(f"✅ Total Symbols Found: {len(stocks)}")
 
 # =========================================================
-# CHROME SETUP
+# TODAY DATE
 # =========================================================
 
-print("\n🚀 Launching Chrome Browser...")
+today_date = datetime.now().date()
+
+print(f"📅 Today Date: {today_date}")
+
+# =========================================================
+# CHROME OPTIONS
+# =========================================================
 
 chrome_options = Options()
 
@@ -104,52 +80,44 @@ chrome_options.add_argument("--disable-dev-shm-usage")
 chrome_options.add_argument("--disable-blink-features=AutomationControlled")
 chrome_options.add_argument("--window-size=1920,1080")
 
-driver = webdriver.Chrome(
-    service=Service(ChromeDriverManager().install()),
-    options=chrome_options
-)
+print("\n🚀 Starting Chrome...")
 
-print("✅ Chrome Started Successfully")
+driver = webdriver.Chrome(options=chrome_options)
+
+print("✅ Chrome Started")
 
 # =========================================================
-# PROCESS STOCKS
+# COUNTERS
 # =========================================================
 
 total_saved = 0
 total_duplicates = 0
-total_errors = 0
+
+# =========================================================
+# LOOP SYMBOLS
+# =========================================================
 
 for index, stock in enumerate(stocks, start=1):
 
     symbol = stock["symbol"]
 
-    print("\n====================================================")
-    print(f"📊 [{index}/{len(stocks)}] Processing: {symbol}")
-    print("====================================================")
+    print("\n================================================")
+    print(f"📊 [{index}/{len(stocks)}] {symbol}")
+    print("================================================")
 
     try:
-
-        # =================================================
-        # KEEP MYSQL CONNECTION ALIVE
-        # =================================================
-
-        conn.ping(reconnect=True, attempts=3, delay=5)
 
         # =================================================
         # OPEN SEARCH PAGE
         # =================================================
 
-        print("🌐 Opening StockEdge Search...")
-
         driver.get("https://search.stockedge.com/")
 
-        time.sleep(3)
+        time.sleep(1)
 
         # =================================================
-        # SEARCH STOCK
+        # SEARCH SYMBOL
         # =================================================
-
-        print(f"🔍 Searching Symbol: {symbol}")
 
         search_box = driver.find_element(By.ID, "searchText")
 
@@ -161,13 +129,11 @@ for index, stock in enumerate(stocks, start=1):
 
         search_box.send_keys(Keys.ENTER)
 
-        time.sleep(5)
+        time.sleep(2)
 
         # =================================================
-        # GET RESULT
+        # GET FIRST RESULT
         # =================================================
-
-        print("📄 Extracting stock URL...")
 
         first_result = driver.find_element(
             By.CSS_SELECTOR,
@@ -189,8 +155,6 @@ for index, stock in enumerate(stocks, start=1):
 
             continue
 
-        print(f"✅ Stock URL Found")
-
         # =================================================
         # OPEN FEEDS PAGE
         # =================================================
@@ -201,32 +165,23 @@ for index, stock in enumerate(stocks, start=1):
 
         driver.get(feed_url)
 
-        time.sleep(5)
+        time.sleep(2)
 
         # =================================================
-        # GET FEED ITEMS
+        # GET FEEDS
         # =================================================
 
         feed_items = driver.find_elements(By.TAG_NAME, "ion-item")
 
-        print(f"📰 Total Feed Items Found: {len(feed_items)}")
-
-        saved_count = 0
-        duplicate_count = 0
+        print(f"📰 Feed Items Found: {len(feed_items)}")
 
         # =================================================
-        # PROCESS FEEDS
+        # PROCESS TODAY NEWS ONLY
         # =================================================
 
-        for item_index, item in enumerate(feed_items, start=1):
+        for item in feed_items:
 
             try:
-
-                # =========================================
-                # KEEP MYSQL CONNECTION ALIVE
-                # =========================================
-
-                conn.ping(reconnect=True, attempts=3, delay=5)
 
                 # =========================================
                 # GET DATE
@@ -243,6 +198,17 @@ for index, stock in enumerate(stocks, start=1):
                 ).date()
 
                 # =========================================
+                # STOP IF OLDER DATE
+                # =========================================
+
+                if log_date != today_date:
+
+                    print(f"⏭ Older News Found: {log_date}")
+                    print("🛑 Stopping")
+
+                    break
+
+                # =========================================
                 # GET HEADLINE
                 # =========================================
 
@@ -254,9 +220,7 @@ for index, stock in enumerate(stocks, start=1):
                 if not headline:
                     continue
 
-                print(f"\n📝 Feed #{item_index}")
-                print(f"📅 Date: {log_date}")
-                print(f"📰 Headline: {headline[:120]}")
+                print(f"\n📰 {headline}")
 
                 # =========================================
                 # CHECK DUPLICATE
@@ -284,10 +248,9 @@ for index, stock in enumerate(stocks, start=1):
 
                 if exists:
 
-                    duplicate_count += 1
                     total_duplicates += 1
 
-                    print("⚠ Duplicate News")
+                    print("⚠ Already Exists")
 
                     continue
 
@@ -314,35 +277,19 @@ for index, stock in enumerate(stocks, start=1):
                     )
                 )
 
-                saved_count += 1
                 total_saved += 1
 
-                print("✅ News Saved Successfully")
+                print("✅ Saved")
 
             except Exception as feed_error:
 
-                print(f"❌ Feed Processing Error: {feed_error}")
+                print(f"❌ Feed Error: {feed_error}")
 
                 continue
 
-        # =================================================
-        # STOCK SUMMARY
-        # =================================================
-
-        print("\n--------------------------------------------")
-        print(f"✅ Completed: {symbol}")
-        print(f"💾 Saved: {saved_count}")
-        print(f"⚠ Duplicates: {duplicate_count}")
-        print("--------------------------------------------")
-
     except Exception as stock_error:
 
-        total_errors += 1
-
-        print(f"\n❌ STOCK ERROR: {symbol}")
-        print(f"❌ Error Message: {stock_error}")
-
-        traceback.print_exc()
+        print(f"❌ Stock Error: {stock_error}")
 
         continue
 
@@ -350,21 +297,18 @@ for index, stock in enumerate(stocks, start=1):
 # CLOSE EVERYTHING
 # =========================================================
 
-print("\n====================================================")
-print("🎯 FINAL SUMMARY")
-print("====================================================")
-
-print(f"✅ Total News Saved: {total_saved}")
-print(f"⚠ Total Duplicates: {total_duplicates}")
-print(f"❌ Total Errors: {total_errors}")
-
 driver.quit()
 
 cursor.close()
 
 conn.close()
 
-print("\n✅ Browser Closed")
-print("✅ MySQL Closed")
-print("✅ Script Completed")
+print("\n================================================")
+print("🎯 FINAL SUMMARY")
+print("================================================")
 
+print(f"✅ Total News Saved: {total_saved}")
+print(f"⚠ Total Duplicates: {total_duplicates}")
+
+print("\n✅ Script Completed")
+```
