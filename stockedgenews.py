@@ -11,7 +11,7 @@ import os
 import sys
 
 # =========================================================
-# LIVE LOGS FOR GITHUB ACTIONS
+# LIVE LOGS
 # =========================================================
 
 sys.stdout.reconfigure(line_buffering=True)
@@ -63,14 +63,6 @@ stocks = cursor.fetchall()
 print(f"✅ Total Symbols Found: {len(stocks)}")
 
 # =========================================================
-# TODAY DATE
-# =========================================================
-
-today_date = datetime.now().date()
-
-print(f"📅 Today Date: {today_date}")
-
-# =========================================================
 # CHROME OPTIONS
 # =========================================================
 
@@ -86,14 +78,12 @@ chrome_options.add_argument("--disable-extensions")
 chrome_options.add_argument("--disable-infobars")
 chrome_options.add_argument("--disable-popup-blocking")
 
-# FASTER PAGE LOADS
 chrome_options.page_load_strategy = "eager"
 
 print("\n🚀 Starting Chrome...")
 
 driver = webdriver.Chrome(options=chrome_options)
 
-# PAGE TIMEOUT
 driver.set_page_load_timeout(30)
 
 print("✅ Chrome Started")
@@ -118,12 +108,10 @@ for index, stock in enumerate(stocks, start=1):
     print(f"📊 [{index}/{len(stocks)}] {symbol}")
     print("================================================")
 
-    today_news_found = False
-
     try:
 
         # =================================================
-        # KEEP MYSQL CONNECTION ALIVE
+        # KEEP MYSQL ALIVE
         # =================================================
 
         conn.ping(reconnect=True, attempts=3, delay=2)
@@ -207,15 +195,27 @@ for index, stock in enumerate(stocks, start=1):
         print(f"📰 Feed Items Found: {len(feed_items)}")
 
         # =================================================
-        # PROCESS FEEDS
+        # NO FEEDS FOUND
         # =================================================
 
-        for item_index, item in enumerate(feed_items, start=1):
+        if len(feed_items) == 0:
+
+            print("📭 No feeds found")
+
+            continue
+
+        # =================================================
+        # FETCH ONLY LATEST 5 NEWS
+        # =================================================
+
+        latest_feeds = feed_items[:5]
+
+        for item_index, item in enumerate(latest_feeds, start=1):
 
             try:
 
                 # =========================================
-                # KEEP MYSQL ALIVE
+                # KEEP MYSQL CONNECTION ALIVE
                 # =========================================
 
                 conn.ping(reconnect=True, attempts=3, delay=2)
@@ -224,32 +224,21 @@ for index, stock in enumerate(stocks, start=1):
                 # GET DATE
                 # =========================================
 
-                date_text = item.find_element(
-                    By.CSS_SELECTOR,
-                    "ion-col:nth-child(2) ion-text"
-                ).text.strip()
+                try:
 
-                log_date = datetime.strptime(
-                    date_text,
-                    "%d-%b-%Y"
-                ).date()
+                    date_text = item.find_element(
+                        By.CSS_SELECTOR,
+                        "ion-col:nth-child(2) ion-text"
+                    ).text.strip()
 
-                # =========================================
-                # STOP IF OLDER DATE
-                # =========================================
+                    log_date = datetime.strptime(
+                        date_text,
+                        "%d-%b-%Y"
+                    ).date()
 
-                if log_date != today_date:
+                except:
 
-                    print(f"⏭ Older News Found: {log_date}")
-                    print("🛑 Stopping Feed Processing")
-
-                    break
-
-                # =========================================
-                # TODAY NEWS FOUND
-                # =========================================
-
-                today_news_found = True
+                    log_date = datetime.now().date()
 
                 # =========================================
                 # GET HEADLINE
@@ -263,7 +252,7 @@ for index, stock in enumerate(stocks, start=1):
                 if not headline:
                     continue
 
-                print(f"\n📰 Feed #{item_index}")
+                print(f"\n📰 Latest News #{item_index}")
                 print(f"📅 {log_date}")
                 print(f"📝 {headline[:150]}")
 
@@ -275,7 +264,6 @@ for index, stock in enumerate(stocks, start=1):
                 SELECT id
                 FROM wp_terminal_news_archive
                 WHERE symbol = %s
-                AND log_date = %s
                 AND news_content = %s
                 LIMIT 1
                 """
@@ -284,7 +272,6 @@ for index, stock in enumerate(stocks, start=1):
                     check_query,
                     (
                         symbol,
-                        log_date,
                         headline
                     )
                 )
@@ -331,67 +318,6 @@ for index, stock in enumerate(stocks, start=1):
                 print(f"❌ Feed Error: {feed_error}")
 
                 continue
-
-        # =================================================
-        # NO NEWS TODAY
-        # =================================================
-
-        if not today_news_found:
-
-            print("📭 No news today")
-
-            no_news_text = "No updates today"
-
-            check_query = """
-            SELECT id
-            FROM wp_terminal_news_archive
-            WHERE symbol = %s
-            AND log_date = %s
-            AND news_content = %s
-            LIMIT 1
-            """
-
-            cursor.execute(
-                check_query,
-                (
-                    symbol,
-                    today_date,
-                    no_news_text
-                )
-            )
-
-            exists = cursor.fetchone()
-
-            if exists:
-
-                total_duplicates += 1
-
-                print("⚠ No-update entry already exists")
-
-            else:
-
-                insert_query = """
-                INSERT INTO wp_terminal_news_archive
-                (
-                    symbol,
-                    log_date,
-                    news_content
-                )
-                VALUES (%s, %s, %s)
-                """
-
-                cursor.execute(
-                    insert_query,
-                    (
-                        symbol,
-                        today_date,
-                        no_news_text
-                    )
-                )
-
-                total_saved += 1
-
-                print("✅ Stored: No updates today")
 
         print(f"✅ Completed: {symbol}")
 
