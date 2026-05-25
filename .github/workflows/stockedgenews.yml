@@ -12,31 +12,60 @@ jobs:
 
     runs-on: ubuntu-latest
 
+    timeout-minutes: 30
+
     steps:
+
+      # ===================================================
+      # CHECKOUT REPOSITORY
+      # ===================================================
 
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      # ===================================================
+      # SETUP PYTHON
+      # ===================================================
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install Google Chrome
-        uses: browser-actions/setup-chrome@v1
+      # ===================================================
+      # SHOW PYTHON VERSION
+      # ===================================================
+
+      - name: Check Python Version
+        run: python --version
+
+      # ===================================================
+      # INSTALL DEPENDENCIES
+      # ===================================================
 
       - name: Install Dependencies
         run: |
+          pip install --upgrade pip
           pip install selenium
-          pip install webdriver-manager
           pip install mysql-connector-python
 
-      - name: Run Script
+      # ===================================================
+      # CHECK GOOGLE CHROME
+      # ===================================================
+
+      - name: Check Chrome
+        run: google-chrome --version
+
+      # ===================================================
+      # RUN SCRIPT
+      # ===================================================
+
+      - name: Run StockEdge News Scraper
         env:
           DB_HOST: ${{ secrets.DB_HOST }}
           DB_NAME: ${{ secrets.DB_NAME }}
           DB_USER: ${{ secrets.DB_USER }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
 
-        run: python stockedgenews.py
+        run: python -u stockedgenews.py
 
