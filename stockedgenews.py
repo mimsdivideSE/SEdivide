@@ -1,9 +1,8 @@
-```python
+
 # =========================================================
 # STOCKEDGE TODAY NEWS SCRAPER
 # ONLY BUY + WATCHLIST SYMBOLS
-# ONLY TODAY NEWS
-# SAVE INTO wp_terminal_news_archive
+# STORE "No updates today" IF NO NEWS
 # =========================================================
 
 from selenium import webdriver
@@ -105,10 +104,12 @@ for index, stock in enumerate(stocks, start=1):
     print(f"📊 [{index}/{len(stocks)}] {symbol}")
     print("================================================")
 
+    today_news_found = False
+
     try:
 
         # =================================================
-        # OPEN SEARCH PAGE
+        # OPEN STOCKEDGE SEARCH
         # =================================================
 
         driver.get("https://search.stockedge.com/")
@@ -209,6 +210,12 @@ for index, stock in enumerate(stocks, start=1):
                     break
 
                 # =========================================
+                # TODAY NEWS FOUND
+                # =========================================
+
+                today_news_found = True
+
+                # =========================================
                 # GET HEADLINE
                 # =========================================
 
@@ -287,6 +294,69 @@ for index, stock in enumerate(stocks, start=1):
 
                 continue
 
+        # =================================================
+        # NO NEWS TODAY
+        # =================================================
+
+        if not today_news_found:
+
+            print("📭 No news today")
+
+            no_news_text = "No updates today"
+
+            # =============================================
+            # CHECK DUPLICATE
+            # =============================================
+
+            check_query = """
+            SELECT id
+            FROM wp_terminal_news_archive
+            WHERE symbol = %s
+            AND log_date = %s
+            AND news_content = %s
+            LIMIT 1
+            """
+
+            cursor.execute(
+                check_query,
+                (
+                    symbol,
+                    today_date,
+                    no_news_text
+                )
+            )
+
+            exists = cursor.fetchone()
+
+            if exists:
+
+                print("⚠ No-update entry already exists")
+
+            else:
+
+                insert_query = """
+                INSERT INTO wp_terminal_news_archive
+                (
+                    symbol,
+                    log_date,
+                    news_content
+                )
+                VALUES (%s, %s, %s)
+                """
+
+                cursor.execute(
+                    insert_query,
+                    (
+                        symbol,
+                        today_date,
+                        no_news_text
+                    )
+                )
+
+                total_saved += 1
+
+                print("✅ Stored: No updates today")
+
     except Exception as stock_error:
 
         print(f"❌ Stock Error: {stock_error}")
@@ -307,8 +377,8 @@ print("\n================================================")
 print("🎯 FINAL SUMMARY")
 print("================================================")
 
-print(f"✅ Total News Saved: {total_saved}")
+print(f"✅ Total Saved: {total_saved}")
 print(f"⚠ Total Duplicates: {total_duplicates}")
 
 print("\n✅ Script Completed")
-```
+
