@@ -1,7 +1,7 @@
 
 # =========================================================
 # STOCKEDGE NEWS SCRAPER + MYSQL STORAGE
-# USING ENV VARIABLES
+# PRODUCTION SAFE VERSION
 # =========================================================
 
 from selenium import webdriver
@@ -13,34 +13,68 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 
 import mysql.connector
+from mysql.connector import Error
+
 from datetime import datetime
 import time
 import os
+import traceback
 
 # =========================================================
-# DATABASE CONFIG FROM ENV
+# DATABASE CONFIG
 # =========================================================
 
 DB_CONFIG = {
     "host": os.getenv("DB_HOST"),
     "user": os.getenv("DB_USER"),
     "password": os.getenv("DB_PASSWORD"),
-    "database": os.getenv("DB_NAME")
+    "database": os.getenv("DB_NAME"),
+
+    # IMPORTANT
+    "connection_timeout": 600,
+    "autocommit": True
 }
 
 # =========================================================
-# CONNECT MYSQL
+# MYSQL CONNECT FUNCTION
 # =========================================================
 
-conn = mysql.connector.connect(**DB_CONFIG)
+def connect_mysql():
+
+    try:
+
+        print("\n🔌 Connecting MySQL...")
+
+        conn = mysql.connector.connect(**DB_CONFIG)
+
+        if conn.is_connected():
+
+            print("✅ MySQL Connected Successfully")
+
+            return conn
+
+    except Error as e:
+
+        print(f"❌ MySQL Connection Error: {e}")
+
+        return None
+
+# =========================================================
+# CREATE MYSQL CONNECTION
+# =========================================================
+
+conn = connect_mysql()
+
+if not conn:
+    raise Exception("Database connection failed")
 
 cursor = conn.cursor(dictionary=True)
-
-print("✅ MySQL Connected")
 
 # =========================================================
 # GET SYMBOLS
 # =========================================================
+
+print("\n📥 Fetching BUY/WATCHLIST symbols...")
 
 query = """
 SELECT DISTINCT symbol
@@ -54,11 +88,13 @@ cursor.execute(query)
 
 stocks = cursor.fetchall()
 
-print(f"✅ Found {len(stocks)} symbols")
+print(f"✅ Total Symbols Found: {len(stocks)}")
 
 # =========================================================
 # CHROME SETUP
 # =========================================================
+
+print("\n🚀 Launching Chrome Browser...")
 
 chrome_options = Options()
 
@@ -73,23 +109,37 @@ driver = webdriver.Chrome(
     options=chrome_options
 )
 
+print("✅ Chrome Started Successfully")
+
 # =========================================================
-# LOOP THROUGH SYMBOLS
+# PROCESS STOCKS
 # =========================================================
 
-for stock in stocks:
+total_saved = 0
+total_duplicates = 0
+total_errors = 0
+
+for index, stock in enumerate(stocks, start=1):
 
     symbol = stock["symbol"]
 
-    print("\n===================================")
-    print(f"🔍 Processing: {symbol}")
-    print("===================================")
+    print("\n====================================================")
+    print(f"📊 [{index}/{len(stocks)}] Processing: {symbol}")
+    print("====================================================")
 
     try:
 
         # =================================================
-        # OPEN STOCKEDGE SEARCH
+        # KEEP MYSQL CONNECTION ALIVE
         # =================================================
+
+        conn.ping(reconnect=True, attempts=3, delay=5)
+
+        # =================================================
+        # OPEN SEARCH PAGE
+        # =================================================
+
+        print("🌐 Opening StockEdge Search...")
 
         driver.get("https://search.stockedge.com/")
 
@@ -98,6 +148,8 @@ for stock in stocks:
         # =================================================
         # SEARCH STOCK
         # =================================================
+
+        print(f"🔍 Searching Symbol: {symbol}")
 
         search_box = driver.find_element(By.ID, "searchText")
 
@@ -109,13 +161,13 @@ for stock in stocks:
 
         search_box.send_keys(Keys.ENTER)
 
-        print(f"Searching: {symbol}")
-
         time.sleep(5)
 
         # =================================================
-        # GET FIRST RESULT
+        # GET RESULT
         # =================================================
+
+        print("📄 Extracting stock URL...")
 
         first_result = driver.find_element(
             By.CSS_SELECTOR,
@@ -132,8 +184,12 @@ for stock in stocks:
         stock_url = stock_link.get_attribute("href")
 
         if not stock_url:
+
             print("❌ No stock URL found")
+
             continue
+
+        print(f"✅ Stock URL Found")
 
         # =================================================
         # OPEN FEEDS PAGE
@@ -141,7 +197,7 @@ for stock in stocks:
 
         feed_url = stock_url + "?section=feeds"
 
-        print("Opening feeds page...")
+        print("📰 Opening feeds page...")
 
         driver.get(feed_url)
 
@@ -153,15 +209,28 @@ for stock in stocks:
 
         feed_items = driver.find_elements(By.TAG_NAME, "ion-item")
 
-        print(f"📰 Found {len(feed_items)} feed items")
+        print(f"📰 Total Feed Items Found: {len(feed_items)}")
+
+        saved_count = 0
+        duplicate_count = 0
 
         # =================================================
-        # LOOP FEEDS
+        # PROCESS FEEDS
         # =================================================
 
-        for item in feed_items:
+        for item_index, item in enumerate(feed_items, start=1):
 
             try:
+
+                # =========================================
+                # KEEP MYSQL CONNECTION ALIVE
+                # =========================================
+
+                conn.ping(reconnect=True, attempts=3, delay=5)
+
+                # =========================================
+                # GET DATE
+                # =========================================
 
                 date_text = item.find_element(
                     By.CSS_SELECTOR,
@@ -173,84 +242,121 @@ for stock in stocks:
                     "%d-%b-%Y"
                 ).date()
 
-            except:
-                continue
-
-            try:
+                # =========================================
+                # GET HEADLINE
+                # =========================================
 
                 headline = item.find_element(
                     By.TAG_NAME,
                     "p"
                 ).text.strip()
 
-            except:
-                headline = ""
+                if not headline:
+                    continue
 
-            if not headline:
-                continue
+                print(f"\n📝 Feed #{item_index}")
+                print(f"📅 Date: {log_date}")
+                print(f"📰 Headline: {headline[:120]}")
 
-            # =============================================
-            # CHECK DUPLICATE
-            # =============================================
+                # =========================================
+                # CHECK DUPLICATE
+                # =========================================
 
-            check_query = """
-            SELECT id
-            FROM wp_terminal_news_archive
-            WHERE symbol = %s
-            AND log_date = %s
-            AND news_content = %s
-            LIMIT 1
-            """
+                check_query = """
+                SELECT id
+                FROM wp_terminal_news_archive
+                WHERE symbol = %s
+                AND log_date = %s
+                AND news_content = %s
+                LIMIT 1
+                """
 
-            cursor.execute(
-                check_query,
+                cursor.execute(
+                    check_query,
+                    (
+                        symbol,
+                        log_date,
+                        headline
+                    )
+                )
+
+                exists = cursor.fetchone()
+
+                if exists:
+
+                    duplicate_count += 1
+                    total_duplicates += 1
+
+                    print("⚠ Duplicate News")
+
+                    continue
+
+                # =========================================
+                # INSERT NEWS
+                # =========================================
+
+                insert_query = """
+                INSERT INTO wp_terminal_news_archive
                 (
                     symbol,
                     log_date,
-                    headline
+                    news_content
                 )
-            )
+                VALUES (%s, %s, %s)
+                """
 
-            exists = cursor.fetchone()
+                cursor.execute(
+                    insert_query,
+                    (
+                        symbol,
+                        log_date,
+                        headline
+                    )
+                )
 
-            if exists:
-                print("⚠ Already exists")
+                saved_count += 1
+                total_saved += 1
+
+                print("✅ News Saved Successfully")
+
+            except Exception as feed_error:
+
+                print(f"❌ Feed Processing Error: {feed_error}")
+
                 continue
 
-            # =============================================
-            # INSERT NEWS
-            # =============================================
+        # =================================================
+        # STOCK SUMMARY
+        # =================================================
 
-            insert_query = """
-            INSERT INTO wp_terminal_news_archive
-            (
-                symbol,
-                log_date,
-                news_content
-            )
-            VALUES (%s, %s, %s)
-            """
+        print("\n--------------------------------------------")
+        print(f"✅ Completed: {symbol}")
+        print(f"💾 Saved: {saved_count}")
+        print(f"⚠ Duplicates: {duplicate_count}")
+        print("--------------------------------------------")
 
-            cursor.execute(
-                insert_query,
-                (
-                    symbol,
-                    log_date,
-                    headline
-                )
-            )
+    except Exception as stock_error:
 
-            conn.commit()
+        total_errors += 1
 
-            print(f"✅ Saved: {headline[:80]}")
+        print(f"\n❌ STOCK ERROR: {symbol}")
+        print(f"❌ Error Message: {stock_error}")
 
-    except Exception as e:
+        traceback.print_exc()
 
-        print(f"❌ Error for {symbol}: {e}")
+        continue
 
 # =========================================================
 # CLOSE EVERYTHING
 # =========================================================
+
+print("\n====================================================")
+print("🎯 FINAL SUMMARY")
+print("====================================================")
+
+print(f"✅ Total News Saved: {total_saved}")
+print(f"⚠ Total Duplicates: {total_duplicates}")
+print(f"❌ Total Errors: {total_errors}")
 
 driver.quit()
 
@@ -258,7 +364,7 @@ cursor.close()
 
 conn.close()
 
-print("\n===================================")
-print("✅ ALL WORK COMPLETED")
-print("===================================")
+print("\n✅ Browser Closed")
+print("✅ MySQL Closed")
+print("✅ Script Completed")
 
