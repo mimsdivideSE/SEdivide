@@ -1,24 +1,20 @@
+
 name: Live Screen Bot
 
 on:
   workflow_dispatch:
-  
-  push:
-    branches: [ main ]
-    paths:
-      - 'livescreen.py'
-      - '.github/workflows/livescreen.yml'
 
   schedule:
-    # 1. Triggers at 3:45 AM UTC (9:15 AM IST) - 15 mins early to beat the 9:30 AM peak delay
-    - cron: "45 3 * * 1-5"
-    
-    # 2. Triggers every hour from 10:30 AM IST to 3:30 PM IST (5:00 AM UTC to 10:00 AM UTC)
-    - cron: "0 5-10 * * 1-5"
+    - cron: "30 3-10 * * 1-5"
+
+concurrency:
+  group: live-screen
+  cancel-in-progress: false
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 55
 
     steps:
       - name: Checkout
@@ -30,7 +26,8 @@ jobs:
           python-version: "3.10"
 
       - name: Install Dependencies
-        run: pip install selenium webdriver-manager mysql-connector-python gspread pandas pytz
+        run: |
+          pip install selenium webdriver-manager mysql-connector-python gspread pandas pytz
 
       - name: Run Script
         env:
@@ -40,6 +37,8 @@ jobs:
           DB_NAME: ${{ secrets.DB_NAME }}
           GSPREAD_CREDENTIALS: ${{ secrets.GSPREAD_CREDENTIALS }}
           TRADINGVIEW_COOKIES: ${{ secrets.TRADINGVIEW_COOKIES }}
+
         run: |
           echo "Starting Live Screen script..."
           python livescreen.py
+
