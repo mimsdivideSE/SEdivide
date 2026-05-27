@@ -67,8 +67,14 @@ def get_clean_driver():
     opts.add_argument("--headless=new")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--disable-gpu")
     opts.add_argument("--window-size=1920,1080")
+
+    # Anti-fingerprint and graphics flags to resolve data connection issues
+    opts.add_argument("--use-gl=angle")
+    opts.add_argument("--use-angle=swiftshader")
+    opts.add_argument("--ignore-certificate-errors")
+    opts.add_argument("--disable-blink-features=AutomationControlled")
+    opts.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
     # PERFORMANCE FLAGS
     opts.add_argument("--disable-extensions")
@@ -78,7 +84,7 @@ def get_clean_driver():
 
     opts.add_experimental_option(
         "excludeSwitches",
-        ["enable-automation"]
+        ["enable-automation", "enable-logging"]
     )
 
     opts.add_experimental_option(
@@ -86,16 +92,21 @@ def get_clean_driver():
         False
     )
 
-    opts.add_argument(
-        "--blink-features=AutomationControlled"
-    )
-
     driver = webdriver.Chrome(
         service=Service(ChromeDriverManager().install()),
         options=opts
     )
 
-    driver.set_page_load_timeout(25)
+    # Core injection script to dynamically mask webdriver attributes
+    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+        "source": """
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+        """
+    })
+
+    driver.set_page_load_timeout(35)
 
     return driver
 
@@ -380,102 +391,21 @@ def main():
 
                 try:
                     driver.get(chart_url)
-
                 except Exception:
                     pass
 
-                WebDriverWait(driver, 20).until(
+                # Explicitly wait until the layout engine structure loads completely
+                WebDriverWait(driver, 30).until(
                     EC.presence_of_element_located(
-                        (By.TAG_NAME, "body")
+                        (By.CLASS_NAME, "chart-container-canvas-layer")
                     )
                 )
 
-                time.sleep(5)
+                # Extended sleep time to confirm candle data stream connection completes
+                time.sleep(8)
 
                 remove_chart_popups(driver)
 
                 time.sleep(2)
 
-                img_data = driver.get_screenshot_as_png()
-
-                save_screenshot_to_db(
-                    filter_id,
-                    symbol,
-                    timeframe,
-                    status,
-                    img_data,
-                    chart_url
-                )
-
-                success_count += 1
-
-                log("✅ Saved")
-
-            except Exception as item_error:
-
-                error_msg = str(item_error)
-
-                log(
-                    f"❌ Failed: {error_msg[:100]}"
-                )
-
-                # RECOVER BROWSER
-                if (
-                    "invalid session id" in error_msg.lower()
-                    or
-                    "chrome not reachable" in error_msg.lower()
-                ):
-
-                    log(
-                        "♻️ Recycling Chrome..."
-                    )
-
-                    try:
-                        driver.quit()
-                    except:
-                        pass
-
-                    driver = get_clean_driver()
-                    
-                    # Re-authenticate browser session upon cycle recovery
-                    try:
-                        driver.get("https://www.tradingview.com/")
-                        for c in cookies:
-                            driver.add_cookie({
-                                "name": c["name"],
-                                "value": c["value"],
-                                "domain": ".tradingview.com",
-                                "path": "/"
-                            })
-                        driver.refresh()
-                    except:
-                        pass
-
-        log(
-            f"🏁 DONE : {success_count} Screenshots Captured"
-        )
-
-    except Exception as critical_error:
-
-        log(
-            f"🚨 CRITICAL ERROR : {critical_error}"
-        )
-
-    finally:
-
-        if driver:
-
-            try:
-
-                driver.quit()
-
-                log(
-                    "🛑 Browser Closed Safely"
-                )
-
-            except:
-                pass
-
-
-if __name__ == "__main__":
-    main()
+                img_data = driver
