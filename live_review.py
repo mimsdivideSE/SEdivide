@@ -1,3 +1,4 @@
+
 import os
 import time
 import json
@@ -62,12 +63,12 @@ def remove_chart_popups(driver):
 
 def wait_for_chart_ready(driver):
 
-    # wait page body
+    # wait body
     WebDriverWait(driver, 40).until(
         EC.presence_of_element_located((By.TAG_NAME, "body"))
     )
 
-    # ensure login completed
+    # ensure login
     WebDriverWait(driver, 40).until(
         lambda d: "signin" not in d.current_url.lower()
     )
@@ -79,7 +80,7 @@ def wait_for_chart_ready(driver):
         )
     )
 
-    # wait until loading/exclamation symbols disappear
+    # wait until loading symbols disappear
     WebDriverWait(driver, 60).until(
         lambda d: len(
             d.find_elements(
@@ -89,7 +90,7 @@ def wait_for_chart_ready(driver):
         ) == 0
     )
 
-    # wait for websocket/chart data stabilization
+    # stabilize websocket/chart data
     time.sleep(10)
 
     # remove popups
@@ -107,7 +108,7 @@ def get_clean_driver():
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--window-size=1920,1080")
 
-    # Anti-fingerprint + graphics stability
+    # anti fingerprint
     opts.add_argument("--use-gl=angle")
     opts.add_argument("--use-angle=swiftshader")
     opts.add_argument("--ignore-certificate-errors")
@@ -142,7 +143,7 @@ def get_clean_driver():
         options=opts
     )
 
-    # mask selenium
+    # hide selenium
     driver.execute_cdp_cmd(
         "Page.addScriptToEvaluateOnNewDocument",
         {
@@ -194,7 +195,7 @@ def login_tradingview(driver):
     # refresh after cookie injection
     driver.refresh()
 
-    # IMPORTANT WAIT
+    # wait for authenticated session
     time.sleep(10)
 
     # verify login
@@ -401,14 +402,13 @@ def main():
 
             urls = {}
 
-            # DAY URL
-           # WEEK URL -> Column C
-if len(row) > 2 and row.iloc[2]:
-    urls["week"] = row.iloc[2]
+            # COLUMN C = WEEK URL
+            if len(row) > 2 and row.iloc[2]:
+                urls["week"] = row.iloc[2].strip()
 
-# DAY URL -> Column D
-if len(row) > 3 and row.iloc[3]:
-    urls["day"] = row.iloc[3]
+            # COLUMN D = DAY URL
+            if len(row) > 3 and row.iloc[3]:
+                urls["day"] = row.iloc[3].strip()
 
             if urls:
                 url_map[symbol] = urls
@@ -441,6 +441,10 @@ if len(row) > 3 and row.iloc[3]:
 
             filter_id = stock["id"]
 
+            log(
+                f"DEBUG => SYMBOL={symbol} | TIMEFRAME={timeframe}"
+            )
+
             # ================= URL ================= #
 
             urls = url_map.get(symbol)
@@ -454,6 +458,10 @@ if len(row) > 3 and row.iloc[3]:
                 continue
 
             chart_url = urls.get(timeframe)
+
+            log(
+                f"DEBUG URL => {chart_url}"
+            )
 
             if not chart_url:
 
@@ -556,3 +564,4 @@ if len(row) > 3 and row.iloc[3]:
 
 if __name__ == "__main__":
     main()
+
