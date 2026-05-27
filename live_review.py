@@ -102,57 +102,38 @@ def main():
 
         # ================= FETCH FILTER STOCKS ================= #
 
-        print("📊 Fetching BUY + WATCHLIST symbols...")
+        print("📊 Fetching BUY + WATCHLIST symbols where depriciate is 0...")
 
-        # Relaxed temporarily to find out exactly why your rows aren't processing
+        # Removed the strict screenshot_path checks so your NULL rows are picked up
         query = f"""
             SELECT
                 id,
                 symbol,
                 timeframe,
                 review_status,
-                depriciate,
                 screenshot_path
             FROM `{FILTER_TABLE}`
             WHERE
-                LOWER(TRIM(review_status)) IN ('buy', 'watchlist')
+                review_status IN ('buy', 'watchlist')
+                AND (depriciate = 0 OR depriciate IS NULL)
             ORDER BY id DESC
         """
 
         cur.execute(query)
-        all_found_stocks = cur.fetchall()
 
-        # Filter manually in Python to log precisely what is failing
-        stocks = []
-        for s in all_found_stocks:
-            status = str(s["review_status"]).lower().strip()
-            dep = s["depriciate"]
-            path = s["screenshot_path"]
-
-            # Validate rules explicitly
-            is_depriciate_ok = (dep == 0 or dep is None)
-            is_path_ok = (path is not None and str(path).strip() != "")
-
-            if is_depriciate_ok and is_path_ok:
-                stocks.append(s)
-            else:
-                # Log exactly why this specific symbol was ignored
-                reasons = []
-                if not is_depriciate_ok:
-                    reasons.append(f"depriciate is {dep} (expected 0/NULL)")
-                if not is_path_ok:
-                    reasons.append("screenshot_path is empty or NULL")
-                print(f"⚠️  Skipped Symbol {s['symbol']} ({status.upper()}) -> Reason: {', '.join(reasons)}")
+        stocks = cur.fetchall()
 
         if not stocks:
-            print("😴 No symbols found matching all criteria after validation.")
+
+            print("😴 No symbols found matching criteria.")
+
             return
 
-        # Separate and count statuses for detailed logging
-        buy_count = sum(1 for s in stocks if str(s["review_status"]).lower().strip() == "buy")
-        watchlist_count = sum(1 for s in stocks if str(s["review_status"]).lower().strip() == "watchlist")
+        # Separate and count statuses for clean, descriptive logging
+        buy_count = sum(1 for s in stocks if s["review_status"].lower() == "buy")
+        watchlist_count = sum(1 for s in stocks if s["review_status"].lower() == "watchlist")
 
-        print(f"✅ Found total {len(stocks)} valid symbols -> [BUY: {buy_count} processed | WATCHLIST: {watchlist_count} processed]")
+        print(f"✅ Found total {len(stocks)} symbols -> [BUY: {buy_count} found | WATCHLIST: {watchlist_count} found]")
 
         # ================= DRIVER ================= #
 
@@ -200,6 +181,10 @@ def main():
                 )
 
                 # ================= OPEN URL ================= #
+                
+                # If there's no URL link, generate a default TradingView chart link using the symbol
+                if not url or str(url).strip() == "":
+                    url = f"https://www.tradingview.com/chart/?symbol={symbol}"
 
                 driver.get(url)
 
