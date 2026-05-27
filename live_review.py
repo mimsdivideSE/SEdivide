@@ -102,39 +102,57 @@ def main():
 
         # ================= FETCH FILTER STOCKS ================= #
 
-        print("📊 Fetching BUY + WATCHLIST symbols where depriciate is 0...")
+        print("📊 Fetching BUY + WATCHLIST symbols...")
 
+        # Relaxed temporarily to find out exactly why your rows aren't processing
         query = f"""
             SELECT
                 id,
                 symbol,
                 timeframe,
                 review_status,
+                depriciate,
                 screenshot_path
             FROM `{FILTER_TABLE}`
             WHERE
-                review_status IN ('buy', 'watchlist')
-                AND (depriciate = 0 OR depriciate IS NULL)
-                AND screenshot_path IS NOT NULL
-                AND screenshot_path != ''
+                LOWER(TRIM(review_status)) IN ('buy', 'watchlist')
             ORDER BY id DESC
         """
 
         cur.execute(query)
+        all_found_stocks = cur.fetchall()
 
-        stocks = cur.fetchall()
+        # Filter manually in Python to log precisely what is failing
+        stocks = []
+        for s in all_found_stocks:
+            status = str(s["review_status"]).lower().strip()
+            dep = s["depriciate"]
+            path = s["screenshot_path"]
+
+            # Validate rules explicitly
+            is_depriciate_ok = (dep == 0 or dep is None)
+            is_path_ok = (path is not None and str(path).strip() != "")
+
+            if is_depriciate_ok and is_path_ok:
+                stocks.append(s)
+            else:
+                # Log exactly why this specific symbol was ignored
+                reasons = []
+                if not is_depriciate_ok:
+                    reasons.append(f"depriciate is {dep} (expected 0/NULL)")
+                if not is_path_ok:
+                    reasons.append("screenshot_path is empty or NULL")
+                print(f"⚠️  Skipped Symbol {s['symbol']} ({status.upper()}) -> Reason: {', '.join(reasons)}")
 
         if not stocks:
-
-            print("😴 No symbols found matching criteria.")
-
+            print("😴 No symbols found matching all criteria after validation.")
             return
 
         # Separate and count statuses for detailed logging
-        buy_count = sum(1 for s in stocks if s["review_status"].lower() == "buy")
-        watchlist_count = sum(1 for s in stocks if s["review_status"].lower() == "watchlist")
+        buy_count = sum(1 for s in stocks if str(s["review_status"]).lower().strip() == "buy")
+        watchlist_count = sum(1 for s in stocks if str(s["review_status"]).lower().strip() == "watchlist")
 
-        print(f"✅ Found total {len(stocks)} symbols -> [BUY: {buy_count} found | WATCHLIST: {watchlist_count} found]")
+        print(f"✅ Found total {len(stocks)} valid symbols -> [BUY: {buy_count} processed | WATCHLIST: {watchlist_count} processed]")
 
         # ================= DRIVER ================= #
 
