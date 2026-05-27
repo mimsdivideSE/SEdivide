@@ -84,20 +84,15 @@ jobs:
           python -m pip install --upgrade pip
 
           pip install selenium
-
           pip install webdriver-manager
-
           pip install mysql-connector-python
-
           pip install pandas
-
           pip install gspread
-
           pip install oauth2client
 
-      # ================= VERIFY ================= #
+      # ================= VERIFY CHROME ================= #
 
-      - name: Verify Chrome
+      - name: Verify Chrome Installation
         run: |
 
           google-chrome --version
@@ -115,6 +110,8 @@ jobs:
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
 
           DB_NAME: ${{ secrets.DB_NAME }}
+
+          TRADINGVIEW_COOKIES: ${{ secrets.TRADINGVIEW_COOKIES }}
 
           GSPREAD_CREDENTIALS: ${{ secrets.GSPREAD_CREDENTIALS }}
 
