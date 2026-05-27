@@ -116,6 +116,12 @@ def main():
                 """
                 cur.execute(query)
                 stocks = cur.fetchall()
+                
+                # --- TRUNCATE TARGET TABLE BEFORE NEW PROCESSING ---
+                if stocks:
+                    log(f"🧹 Truncating target table `{TARGET_TABLE}` before inserting new records...")
+                    cur.execute(f"TRUNCATE TABLE `{TARGET_TABLE}`")
+                    
         finally:
             if 'db_conn' in locals() and db_conn.is_connected():
                 db_conn.close()
