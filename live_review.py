@@ -1,7 +1,7 @@
 import os
 import time
-import json
 import mysql.connector
+import sys
 
 from datetime import datetime
 
@@ -9,7 +9,6 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
@@ -25,71 +24,40 @@ TARGET_TABLE = "live_review_screens"
 
 # ================= HELPERS ================= #
 
-def remove_chart_popups(driver):
-
-    scrub_script = """
-    const popupSelectors = [
-        '[class^="overlap-"]',
-        '[class*="dialog-"]',
-        '[class*="modal-"]',
-        '.tv-dialog__close',
-        '.js-dialog__close',
-        '[data-role="toast-container"]',
-        '[class*="popup-"]',
-        '#overlap-manager-root',
-        '.tp-modal',
-        '.tv-ads-banner'
-    ];
-
-    popupSelectors.forEach(selector => {
-        document.querySelectorAll(selector).forEach(el => el.remove());
-    });
-    """
-
-    try:
-        driver.execute_script(scrub_script)
-
-        driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
-
-    except:
-        pass
+def log(message, end="\n"):
+    """Ensures instant, unbuffered logs appear in GitHub Actions."""
+    print(message, end=end)
+    sys.stdout.flush()
 
 
-def get_optimized_driver():
-
+def get_clean_driver():
     opts = Options()
-
     opts.add_argument("--headless=new")
-
     opts.add_argument("--no-sandbox")
-
     opts.add_argument("--disable-dev-shm-usage")
-
+    opts.add_argument("--disable-gpu")
     opts.add_argument("--window-size=1920,1080")
 
     driver = webdriver.Chrome(
         service=Service(ChromeDriverManager().install()),
         options=opts
     )
-
+    # Strict fallback timeout so a single slow asset never freezes your runner
+    driver.set_page_load_timeout(30)
     return driver
 
 
 # ================= MAIN ================= #
 
 def main():
-
     driver = None
     db_conn = None
 
     try:
+        log(f"🚀 Execution Started : {datetime.utcnow()}")
 
-        print(f"🚀 Execution Started : {datetime.utcnow()}")
-
-        # ================= DB ================= #
-
-        print("🔗 Connecting Database...")
-
+        # ================= DATABASE CONNECTION ================= #
+        log("🔗 Connecting Database...")
         db_conn = mysql.connector.connect(
             host=os.getenv("DB_HOST"),
             user=os.getenv("DB_USER"),
@@ -97,184 +65,97 @@ def main():
             database=os.getenv("DB_NAME"),
             autocommit=True
         )
-
         cur = db_conn.cursor(dictionary=True)
 
-        # ================= FETCH FILTER STOCKS ================= #
-
-        print("📊 Fetching BUY + WATCHLIST symbols where depriciate is 0...")
-
-        # Removed the strict screenshot_path checks so your NULL rows are picked up
+        # ================= FETCH SYMBOLS ================= #
+        log("📊 Fetching BUY & WATCHLIST rows where depriciate is 0...")
         query = f"""
-            SELECT
-                id,
-                symbol,
-                timeframe,
-                review_status,
-                screenshot_path
+            SELECT id, symbol, timeframe, review_status 
             FROM `{FILTER_TABLE}`
-            WHERE
-                review_status IN ('buy', 'watchlist')
-                AND (depriciate = 0 OR depriciate IS NULL)
+            WHERE review_status IN ('buy', 'watchlist')
+              AND (depriciate = 0 OR depriciate IS NULL)
             ORDER BY id DESC
         """
-
         cur.execute(query)
-
         stocks = cur.fetchall()
 
         if not stocks:
-
-            print("😴 No symbols found matching criteria.")
-
+            log("😴 No matching symbols found in the database.")
             return
 
-        # Separate and count statuses for clean, descriptive logging
         buy_count = sum(1 for s in stocks if s["review_status"].lower() == "buy")
         watchlist_count = sum(1 for s in stocks if s["review_status"].lower() == "watchlist")
+        log(f"✅ Targets Found -> Total: {len(stocks)} [BUY: {buy_count} | WATCHLIST: {watchlist_count}]")
 
-        print(f"✅ Found total {len(stocks)} symbols -> [BUY: {buy_count} found | WATCHLIST: {watchlist_count} found]")
-
-        # ================= DRIVER ================= #
-
-        print("🌐 Starting Browser...")
-
-        driver = get_optimized_driver()
-
-        driver.get("https://www.tradingview.com/")
-
-        cookies = json.loads(os.getenv("TRADINGVIEW_COOKIES"))
-
-        for c in cookies:
-
-            driver.add_cookie({
-                "name": c["name"],
-                "value": c["value"],
-                "domain": ".tradingview.com",
-                "path": "/"
-            })
-
-        driver.refresh()
-
+        # ================= INITIALIZE BROWSER ================= #
+        log("🌐 Initializing Headless Chrome Instance...")
+        driver = get_clean_driver()
         success_count = 0
 
-        # ================= LOOP ================= #
-
+        # ================= SCREENSHOT LOOP ================= #
         for stock in stocks:
-
             try:
-
                 symbol = stock["symbol"].upper().strip()
-
                 timeframe = stock["timeframe"]
-
-                review_status = stock["review_status"].upper()
-
-                url = stock["screenshot_path"]
-
+                status = stock["review_status"]
                 filter_id = stock["id"]
 
-                print(
-                    f"📸 [{success_count + 1}/{len(stocks)}] {symbol} [{timeframe}] ({review_status})",
-                    end=" ",
-                    flush=True
+                # Directly load the clean ticker chart layout
+                chart_url = f"https://www.tradingview.com/chart/?symbol={symbol}"
+                log(f"📸 [{success_count + 1}/{len(stocks)}] Processing {symbol} ({status.upper()})...", end=" ")
+
+                try:
+                    driver.get(chart_url)
+                except Exception:
+                    # If page assets take longer than 30s to fully download, proceed with what's loaded
+                    pass
+
+                # Give chart elements brief moment to render candles cleanly
+                WebDriverWait(driver, 15).until(
+                    EC.presence_of_element_located((By.TAG_NAME, "body"))
                 )
+                time.sleep(5)
 
-                # ================= OPEN URL ================= #
-                
-                # If there's no URL link, generate a default TradingView chart link using the symbol
-                if not url or str(url).strip() == "":
-                    url = f"https://www.tradingview.com/chart/?symbol={symbol}"
-
-                driver.get(url)
-
-                WebDriverWait(driver, 25).until(
-                    EC.presence_of_element_located(
-                        (By.TAG_NAME, "body")
-                    )
-                )
-
-                time.sleep(6)
-
-                remove_chart_popups(driver)
-
-                time.sleep(2)
-
-                # ================= SCREENSHOT ================= #
-
+                # Snap the picture
                 img_data = driver.get_screenshot_as_png()
 
-                # ================= DELETE OLD ================= #
-
+                # Update Destination Table
                 cur.execute(
-                    f"""
-                    DELETE FROM `{TARGET_TABLE}`
-                    WHERE filter_id = %s
-                    """,
+                    f"DELETE FROM `{TARGET_TABLE}` WHERE filter_id = %s", 
                     (filter_id,)
                 )
 
-                # ================= INSERT NEW ================= #
-
                 insert_sql = f"""
                     INSERT INTO `{TARGET_TABLE}`
-                    (
-                        filter_id,
-                        symbol,
-                        timeframe,
-                        review_status,
-                        screenshot,
-                        source_url,
-                        created_at
-                    )
-                    VALUES
-                    (%s, %s, %s, %s, %s, %s, %s)
+                    (filter_id, symbol, timeframe, review_status, screenshot, source_url, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """
-
                 cur.execute(
                     insert_sql,
-                    (
-                        filter_id,
-                        symbol,
-                        timeframe,
-                        stock["review_status"],
-                        img_data,
-                        url,
-                        datetime.utcnow()
-                    )
+                    (filter_id, symbol, timeframe, status, img_data, chart_url, datetime.utcnow())
                 )
 
                 success_count += 1
+                log("✅ Saved")
 
-                print("✅ Saved")
+            except Exception as item_error:
+                log(f"❌ Failed: {str(item_error)[:100]}")
 
-            except Exception as e:
+        log(f"🏁 DONE : Completed {success_count} snapshots successfully.")
 
-                print(f"❌ ERROR : {str(e)[:200]}")
-
-        print(f"🏁 DONE : {success_count} screenshots stored.")
-
-    except Exception as e:
-
-        print(f"🚨 CRITICAL ERROR : {e}")
+    except Exception as critical_error:
+        log(f"🚨 CRITICAL ERROR : {critical_error}")
 
     finally:
-
         if db_conn and db_conn.is_connected():
-
             cur.close()
-
             db_conn.close()
-
-            print("🔌 Database Closed")
+            log("🔌 Database Closed")
 
         if driver:
-
             driver.quit()
-
-            print("🛑 Browser Closed")
+            log("🛑 Browser Closed")
 
 
 if __name__ == "__main__":
-
     main()
