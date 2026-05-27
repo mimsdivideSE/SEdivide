@@ -60,6 +60,44 @@ def remove_chart_popups(driver):
         pass
 
 
+def wait_for_chart_ready(driver):
+
+    # wait page body
+    WebDriverWait(driver, 40).until(
+        EC.presence_of_element_located((By.TAG_NAME, "body"))
+    )
+
+    # ensure login completed
+    WebDriverWait(driver, 40).until(
+        lambda d: "signin" not in d.current_url.lower()
+    )
+
+    # wait chart canvas
+    WebDriverWait(driver, 60).until(
+        EC.presence_of_element_located(
+            (By.TAG_NAME, "canvas")
+        )
+    )
+
+    # wait until loading/exclamation symbols disappear
+    WebDriverWait(driver, 60).until(
+        lambda d: len(
+            d.find_elements(
+                By.XPATH,
+                "//*[contains(text(),'!')]"
+            )
+        ) == 0
+    )
+
+    # wait for websocket/chart data stabilization
+    time.sleep(10)
+
+    # remove popups
+    remove_chart_popups(driver)
+
+    time.sleep(2)
+
+
 def get_clean_driver():
 
     opts = Options()
@@ -69,14 +107,21 @@ def get_clean_driver():
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--window-size=1920,1080")
 
-    # Anti-fingerprint and graphics flags to resolve data connection issues
+    # Anti-fingerprint + graphics stability
     opts.add_argument("--use-gl=angle")
     opts.add_argument("--use-angle=swiftshader")
     opts.add_argument("--ignore-certificate-errors")
     opts.add_argument("--disable-blink-features=AutomationControlled")
-    opts.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
-    # PERFORMANCE FLAGS
+    opts.add_argument(
+        "user-agent=Mozilla/5.0 "
+        "(Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 "
+        "(KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    )
+
+    # performance
     opts.add_argument("--disable-extensions")
     opts.add_argument("--disable-infobars")
     opts.add_argument("--disable-notifications")
@@ -97,18 +142,70 @@ def get_clean_driver():
         options=opts
     )
 
-    # Core injection script to dynamically mask webdriver attributes
-    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-        "source": """
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined
-            });
-        """
-    })
+    # mask selenium
+    driver.execute_cdp_cmd(
+        "Page.addScriptToEvaluateOnNewDocument",
+        {
+            "source": """
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+            """
+        }
+    )
 
-    driver.set_page_load_timeout(35)
+    driver.set_page_load_timeout(60)
 
     return driver
+
+
+def login_tradingview(driver):
+
+    log("🍪 Injecting TradingView Session...")
+
+    driver.get("https://www.tradingview.com/")
+
+    time.sleep(5)
+
+    cookies = json.loads(
+        os.getenv("TRADINGVIEW_COOKIES")
+    )
+
+    for c in cookies:
+
+        try:
+
+            cookie_payload = {
+                "name": c["name"],
+                "value": c["value"],
+                "domain": ".tradingview.com",
+                "path": "/"
+            }
+
+            if "expiry" in c:
+                cookie_payload["expiry"] = c["expiry"]
+
+            driver.add_cookie(cookie_payload)
+
+        except Exception as cookie_error:
+
+            log(f"⚠️ Cookie Error: {cookie_error}")
+
+    # refresh after cookie injection
+    driver.refresh()
+
+    # IMPORTANT WAIT
+    time.sleep(10)
+
+    # verify login
+    current_url = driver.current_url.lower()
+
+    if "signin" in current_url:
+        raise Exception(
+            "TradingView Login Failed. Cookies expired."
+        )
+
+    log("✅ TradingView Session Active")
 
 
 def save_screenshot_to_db(
@@ -210,9 +307,7 @@ def main():
 
             with db_conn.cursor(dictionary=True) as cur:
 
-                log(
-                    "📊 Fetching BUY & WATCHLIST rows..."
-                )
+                log("📊 Fetching BUY & WATCHLIST rows...")
 
                 query = f"""
                     SELECT
@@ -252,9 +347,7 @@ def main():
 
                 db_conn.close()
 
-                log(
-                    "🔌 Database Connection Closed."
-                )
+                log("🔌 Database Connection Closed.")
 
         if not stocks:
 
@@ -319,27 +412,15 @@ def main():
             if urls:
                 url_map[symbol] = urls
 
-        # ================= BROWSER INITIALIZATION WITH COOKIES ================= #
+        # ================= BROWSER ================= #
 
         log("🌐 Initializing Chrome...")
 
         driver = get_clean_driver()
 
-        log("🍪 Injecting TradingView Authentication Session...")
-        
-        driver.get("https://www.tradingview.com/")
+        # ================= LOGIN ================= #
 
-        cookies = json.loads(os.getenv("TRADINGVIEW_COOKIES"))
-
-        for c in cookies:
-            driver.add_cookie({
-                "name": c["name"],
-                "value": c["value"],
-                "domain": ".tradingview.com",
-                "path": "/"
-            })
-
-        driver.refresh()
+        login_tradingview(driver)
 
         success_count = 0
 
@@ -359,7 +440,7 @@ def main():
 
             filter_id = stock["id"]
 
-            # ================= GET GOOGLE SHEET URL ================= #
+            # ================= URL ================= #
 
             urls = url_map.get(symbol)
 
@@ -383,35 +464,24 @@ def main():
 
             log(
                 f"📸 [{idx}/{len(stocks)}] "
-                f"{symbol} ({status.upper()}) [{timeframe}]...",
+                f"{symbol} "
+                f"({status.upper()}) "
+                f"[{timeframe}]...",
                 end=" "
             )
 
             try:
 
-                try:
-                    driver.get(chart_url)
-                except Exception:
-                    pass
+                # open chart
+                driver.get(chart_url)
 
-                # Flexible wait condition matching multiple structural container variants
-                WebDriverWait(driver, 30).until(
-                    EC.any_of(
-                        EC.presence_of_element_located((By.CLASS_NAME, "chart-container-canvas-layer")),
-                        EC.presence_of_element_located((By.CLASS_NAME, "layout__area--center")),
-                        EC.presence_of_element_located((By.TAG_NAME, "canvas"))
-                    )
-                )
+                # wait until chart fully loaded
+                wait_for_chart_ready(driver)
 
-                # Safe structural allocation wait 
-                time.sleep(8)
-
-                remove_chart_popups(driver)
-
-                time.sleep(2)
-
+                # screenshot
                 img_data = driver.get_screenshot_as_png()
 
+                # save
                 save_screenshot_to_db(
                     filter_id,
                     symbol,
@@ -430,10 +500,10 @@ def main():
                 error_msg = str(item_error)
 
                 log(
-                    f"❌ Failed: {error_msg[:100]}"
+                    f"❌ Failed: {error_msg[:120]}"
                 )
 
-                # RECOVER BROWSER
+                # browser recovery
                 if (
                     "invalid session id" in error_msg.lower()
                     or
@@ -442,9 +512,7 @@ def main():
                     "timeout" in error_msg.lower()
                 ):
 
-                    log(
-                        "♻️ Recycling Chrome..."
-                    )
+                    log("♻️ Recycling Chrome...")
 
                     try:
                         driver.quit()
@@ -452,22 +520,17 @@ def main():
                         pass
 
                     driver = get_clean_driver()
-                    
+
                     try:
-                        driver.get("https://www.tradingview.com/")
-                        for c in cookies:
-                            driver.add_cookie({
-                                "name": c["name"],
-                                "value": c["value"],
-                                "domain": ".tradingview.com",
-                                "path": "/"
-                            })
-                        driver.refresh()
-                    except:
-                        pass
+                        login_tradingview(driver)
+                    except Exception as relogin_error:
+                        log(
+                            f"❌ Re-Login Failed: {relogin_error}"
+                        )
 
         log(
-            f"🏁 DONE : {success_count} Screenshots Captured"
+            f"🏁 DONE : {success_count} "
+            f"Screenshots Captured"
         )
 
     except Exception as critical_error:
@@ -484,9 +547,7 @@ def main():
 
                 driver.quit()
 
-                log(
-                    "🛑 Browser Closed Safely"
-                )
+                log("🛑 Browser Closed Safely")
 
             except:
                 pass
