@@ -210,3 +210,68 @@ def main():
                     """,
                     (filter_id,)
                 )
+
+                # ================= INSERT NEW ================= #
+
+                insert_sql = f"""
+                    INSERT INTO `{TARGET_TABLE}`
+                    (
+                        filter_id,
+                        symbol,
+                        timeframe,
+                        review_status,
+                        screenshot,
+                        source_url,
+                        created_at
+                    )
+                    VALUES
+                    (%s, %s, %s, %s, %s, %s, %s)
+                """
+
+                cur.execute(
+                    insert_sql,
+                    (
+                        filter_id,
+                        symbol,
+                        timeframe,
+                        stock["review_status"],
+                        img_data,
+                        url,
+                        datetime.utcnow()
+                    )
+                )
+
+                success_count += 1
+
+                print("✅ Saved")
+
+            except Exception as e:
+
+                print(f"❌ ERROR : {str(e)[:200]}")
+
+        print(f"🏁 DONE : {success_count} screenshots stored.")
+
+    except Exception as e:
+
+        print(f"🚨 CRITICAL ERROR : {e}")
+
+    finally:
+
+        if db_conn and db_conn.is_connected():
+
+            cur.close()
+
+            db_conn.close()
+
+            print("🔌 Database Closed")
+
+        if driver:
+
+            driver.quit()
+
+            print("🛑 Browser Closed")
+
+
+if __name__ == "__main__":
+
+    main()
