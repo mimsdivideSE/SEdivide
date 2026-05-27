@@ -408,4 +408,85 @@ def main():
 
                 time.sleep(2)
 
-                img_data = driver
+                img_data = driver.get_screenshot_as_png()
+
+                save_screenshot_to_db(
+                    filter_id,
+                    symbol,
+                    timeframe,
+                    status,
+                    img_data,
+                    chart_url
+                )
+
+                success_count += 1
+
+                log("✅ Saved")
+
+            except Exception as item_error:
+
+                error_msg = str(item_error)
+
+                log(
+                    f"❌ Failed: {error_msg[:100]}"
+                )
+
+                # RECOVER BROWSER
+                if (
+                    "invalid session id" in error_msg.lower()
+                    or
+                    "chrome not reachable" in error_msg.lower()
+                ):
+
+                    log(
+                        "♻️ Recycling Chrome..."
+                    )
+
+                    try:
+                        driver.quit()
+                    except:
+                        pass
+
+                    driver = get_clean_driver()
+                    
+                    try:
+                        driver.get("https://www.tradingview.com/")
+                        for c in cookies:
+                            driver.add_cookie({
+                                "name": c["name"],
+                                "value": c["value"],
+                                "domain": ".tradingview.com",
+                                "path": "/"
+                            })
+                        driver.refresh()
+                    except:
+                        pass
+
+        log(
+            f"🏁 DONE : {success_count} Screenshots Captured"
+        )
+
+    except Exception as critical_error:
+
+        log(
+            f"🚨 CRITICAL ERROR : {critical_error}"
+        )
+
+    finally:
+
+        if driver:
+
+            try:
+
+                driver.quit()
+
+                log(
+                    "🛑 Browser Closed Safely"
+                )
+
+            except:
+                pass
+
+
+if __name__ == "__main__":
+    main()
