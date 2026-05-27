@@ -63,40 +63,70 @@ def remove_chart_popups(driver):
 
 def wait_for_chart_ready(driver):
 
-    # wait body
-    WebDriverWait(driver, 40).until(
-        EC.presence_of_element_located((By.TAG_NAME, "body"))
+    # ================= BODY ================= #
+
+    WebDriverWait(driver, 60).until(
+        EC.presence_of_element_located(
+            (By.TAG_NAME, "body")
+        )
     )
 
-    # ensure login
-    WebDriverWait(driver, 40).until(
+    # ================= LOGIN ================= #
+
+    WebDriverWait(driver, 60).until(
         lambda d: "signin" not in d.current_url.lower()
     )
 
-    # wait chart canvas
-    WebDriverWait(driver, 60).until(
+    # ================= CANVAS ================= #
+
+    WebDriverWait(driver, 90).until(
         EC.presence_of_element_located(
             (By.TAG_NAME, "canvas")
         )
     )
 
-    # wait until loading symbols disappear
-    WebDriverWait(driver, 60).until(
-        lambda d: len(
-            d.find_elements(
-                By.XPATH,
-                "//*[contains(text(),'!')]"
-            )
-        ) == 0
-    )
+    # ================= WAIT FOR CHART ================= #
 
-    # stabilize websocket/chart data
-    time.sleep(10)
+    time.sleep(8)
 
-    # remove popups
+    # ================= REMOVE POPUPS ================= #
+
     remove_chart_popups(driver)
 
     time.sleep(2)
+
+    # ================= CHECK CHART REALLY LOADED ================= #
+
+    chart_ready = driver.execute_script("""
+        const canvases = document.querySelectorAll('canvas');
+
+        if (!canvases.length) {
+            return false;
+        }
+
+        for (const c of canvases) {
+
+            const rect = c.getBoundingClientRect();
+
+            if (
+                rect.width > 300 &&
+                rect.height > 200
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    """)
+
+    if not chart_ready:
+        raise Exception(
+            "Chart canvas not rendered properly"
+        )
+
+    # ================= FINAL STABILIZATION ================= #
+
+    time.sleep(5)
 
 
 def get_clean_driver():
@@ -106,6 +136,12 @@ def get_clean_driver():
     opts.add_argument("--headless=new")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
+
+    # IMPORTANT STABILITY FLAGS
+    opts.add_argument("--disable-gpu")
+    opts.add_argument("--disable-software-rasterizer")
+    opts.add_argument("--disable-features=VizDisplayCompositor")
+
     opts.add_argument("--window-size=1920,1080")
 
     # anti fingerprint
@@ -155,7 +191,7 @@ def get_clean_driver():
         }
     )
 
-    driver.set_page_load_timeout(60)
+    driver.set_page_load_timeout(90)
 
     return driver
 
@@ -192,13 +228,12 @@ def login_tradingview(driver):
 
             log(f"⚠️ Cookie Error: {cookie_error}")
 
-    # refresh after cookie injection
+    # refresh after cookies
     driver.refresh()
 
-    # wait for authenticated session
+    # important wait
     time.sleep(10)
 
-    # verify login
     current_url = driver.current_url.lower()
 
     if "signin" in current_url:
@@ -484,11 +519,41 @@ def main():
                 # open chart
                 driver.get(chart_url)
 
-                # wait until chart fully loaded
+                # wait chart
                 wait_for_chart_ready(driver)
 
-                # screenshot
-                img_data = driver.get_screenshot_as_png()
+                # stabilize viewport
+                driver.execute_script(
+                    "window.scrollTo(0, 0);"
+                )
+
+                time.sleep(2)
+
+                # screenshot retry logic
+                img_data = None
+
+                for attempt in range(3):
+
+                    try:
+
+                        img_data = driver.get_screenshot_as_png()
+
+                        if (
+                            img_data
+                            and
+                            len(img_data) > 50000
+                        ):
+                            break
+
+                    except Exception:
+                        pass
+
+                    time.sleep(3)
+
+                if not img_data:
+                    raise Exception(
+                        "Failed to capture screenshot"
+                    )
 
                 # save
                 save_screenshot_to_db(
@@ -509,16 +574,18 @@ def main():
                 error_msg = str(item_error)
 
                 log(
-                    f"❌ Failed: {error_msg[:120]}"
+                    f"❌ Failed: {error_msg[:200]}"
                 )
 
-                # browser recovery
+                # recover browser
                 if (
                     "invalid session id" in error_msg.lower()
                     or
                     "chrome not reachable" in error_msg.lower()
                     or
                     "timeout" in error_msg.lower()
+                    or
+                    "disconnected" in error_msg.lower()
                 ):
 
                     log("♻️ Recycling Chrome...")
