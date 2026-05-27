@@ -42,4 +42,4 @@ jobs:
           TRADINGVIEW_COOKIES: ${{ secrets.TRADINGVIEW_COOKIES }}
 
         run: |
-          python livescreen.py
+          python live_review.py
