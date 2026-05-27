@@ -169,6 +169,22 @@ def main():
 
         driver.refresh()
 
+        # ====================================================
+        # DELETE ALL UNTAGGED ROWS BEFORE NEW RUN
+        # ====================================================
+
+        print("🧹 Removing all untagged rows...")
+
+        cur.execute(
+            f"""
+            DELETE FROM `{TARGET_TABLE}`
+            WHERE tags IS NULL
+            OR tags = ''
+            """
+        )
+
+        print("✅ Old untagged rows removed.")
+
         success_count = 0
 
         # ---------------- LOOP ---------------- #
@@ -232,7 +248,7 @@ def main():
                     tagged_row = cur.fetchone()
 
                     # ====================================================
-                    # IF TAGGED ROW EXISTS -> UPDATE IT
+                    # UPDATE TAGGED ROW
                     # ====================================================
 
                     if tagged_row:
@@ -261,22 +277,11 @@ def main():
                         print("🔒 Tagged Row Updated ✅")
 
                     # ====================================================
-                    # OTHERWISE DELETE OLD UNTAGGED ROW
+                    # INSERT NEW ROW
                     # ====================================================
 
                     else:
 
-                        cur.execute(
-                            f"""
-                            DELETE FROM `{TARGET_TABLE}`
-                            WHERE symbol = %s
-                            AND timeframe = %s
-                            AND (tags IS NULL OR tags = '')
-                            """,
-                            (symbol, timeframe)
-                        )
-
-                        # INSERT NEW ROW
                         insert_sql = f"""
                             INSERT INTO `{TARGET_TABLE}`
                             (
@@ -333,3 +338,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
