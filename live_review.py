@@ -394,14 +394,16 @@ def main():
                 except Exception:
                     pass
 
-                # Explicitly wait until the layout engine structure loads completely
+                # Flexible wait condition matching multiple structural container variants
                 WebDriverWait(driver, 30).until(
-                    EC.presence_of_element_located(
-                        (By.CLASS_NAME, "chart-container-canvas-layer")
+                    EC.any_of(
+                        EC.presence_of_element_located((By.CLASS_NAME, "chart-container-canvas-layer")),
+                        EC.presence_of_element_located((By.CLASS_NAME, "layout__area--center")),
+                        EC.presence_of_element_located((By.TAG_NAME, "canvas"))
                     )
                 )
 
-                # Extended sleep time to confirm candle data stream connection completes
+                # Safe structural allocation wait 
                 time.sleep(8)
 
                 remove_chart_popups(driver)
@@ -436,6 +438,8 @@ def main():
                     "invalid session id" in error_msg.lower()
                     or
                     "chrome not reachable" in error_msg.lower()
+                    or
+                    "timeout" in error_msg.lower()
                 ):
 
                     log(
