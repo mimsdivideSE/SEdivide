@@ -1,4 +1,3 @@
-
 import os
 import time
 import json
@@ -309,11 +308,27 @@ def main():
             if urls:
                 url_map[symbol] = urls
 
-        # ================= BROWSER ================= #
+        # ================= BROWSER INITIALIZATION WITH COOKIES ================= #
 
         log("🌐 Initializing Chrome...")
 
         driver = get_clean_driver()
+
+        log("🍪 Injecting TradingView Authentication Session...")
+        
+        driver.get("https://www.tradingview.com/")
+
+        cookies = json.loads(os.getenv("TRADINGVIEW_COOKIES"))
+
+        for c in cookies:
+            driver.add_cookie({
+                "name": c["name"],
+                "value": c["value"],
+                "domain": ".tradingview.com",
+                "path": "/"
+            })
+
+        driver.refresh()
 
         success_count = 0
 
@@ -421,6 +436,20 @@ def main():
                         pass
 
                     driver = get_clean_driver()
+                    
+                    # Re-authenticate browser session upon cycle recovery
+                    try:
+                        driver.get("https://www.tradingview.com/")
+                        for c in cookies:
+                            driver.add_cookie({
+                                "name": c["name"],
+                                "value": c["value"],
+                                "domain": ".tradingview.com",
+                                "path": "/"
+                            })
+                        driver.refresh()
+                    except:
+                        pass
 
         log(
             f"🏁 DONE : {success_count} Screenshots Captured"
