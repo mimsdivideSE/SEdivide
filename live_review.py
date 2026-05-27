@@ -1,4 +1,3 @@
-
 import os
 import time
 import json
@@ -103,7 +102,7 @@ def main():
 
         # ================= FETCH FILTER STOCKS ================= #
 
-        print("📊 Fetching BUY + WATCHLIST symbols...")
+        print("📊 Fetching BUY + WATCHLIST symbols where depriciate is 0...")
 
         query = f"""
             SELECT
@@ -115,7 +114,7 @@ def main():
             FROM `{FILTER_TABLE}`
             WHERE
                 review_status IN ('buy', 'watchlist')
-                AND IFNULL(depriciate, 0) != 1
+                AND (depriciate = 0 OR depriciate IS NULL)
                 AND screenshot_path IS NOT NULL
                 AND screenshot_path != ''
             ORDER BY id DESC
@@ -127,11 +126,15 @@ def main():
 
         if not stocks:
 
-            print("😴 No symbols found.")
+            print("😴 No symbols found matching criteria.")
 
             return
 
-        print(f"✅ Found {len(stocks)} symbols")
+        # Separate and count statuses for detailed logging
+        buy_count = sum(1 for s in stocks if s["review_status"].lower() == "buy")
+        watchlist_count = sum(1 for s in stocks if s["review_status"].lower() == "watchlist")
+
+        print(f"✅ Found total {len(stocks)} symbols -> [BUY: {buy_count} found | WATCHLIST: {watchlist_count} found]")
 
         # ================= DRIVER ================= #
 
@@ -166,14 +169,14 @@ def main():
 
                 timeframe = stock["timeframe"]
 
-                review_status = stock["review_status"]
+                review_status = stock["review_status"].upper()
 
                 url = stock["screenshot_path"]
 
                 filter_id = stock["id"]
 
                 print(
-                    f"📸 [{success_count + 1}/{len(stocks)}] {symbol} [{timeframe}]",
+                    f"📸 [{success_count + 1}/{len(stocks)}] {symbol} [{timeframe}] ({review_status})",
                     end=" ",
                     flush=True
                 )
@@ -207,68 +210,3 @@ def main():
                     """,
                     (filter_id,)
                 )
-
-                # ================= INSERT NEW ================= #
-
-                insert_sql = f"""
-                    INSERT INTO `{TARGET_TABLE}`
-                    (
-                        filter_id,
-                        symbol,
-                        timeframe,
-                        review_status,
-                        screenshot,
-                        source_url,
-                        created_at
-                    )
-                    VALUES
-                    (%s, %s, %s, %s, %s, %s, %s)
-                """
-
-                cur.execute(
-                    insert_sql,
-                    (
-                        filter_id,
-                        symbol,
-                        timeframe,
-                        review_status,
-                        img_data,
-                        url,
-                        datetime.utcnow()
-                    )
-                )
-
-                success_count += 1
-
-                print("✅ Saved")
-
-            except Exception as e:
-
-                print(f"❌ ERROR : {str(e)[:200]}")
-
-        print(f"🏁 DONE : {success_count} screenshots stored.")
-
-    except Exception as e:
-
-        print(f"🚨 CRITICAL ERROR : {e}")
-
-    finally:
-
-        if db_conn and db_conn.is_connected():
-
-            cur.close()
-
-            db_conn.close()
-
-            print("🔌 Database Closed")
-
-        if driver:
-
-            driver.quit()
-
-            print("🛑 Browser Closed")
-
-
-if __name__ == "__main__":
-
-    main()
