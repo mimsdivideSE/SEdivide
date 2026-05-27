@@ -402,12 +402,13 @@ def main():
             urls = {}
 
             # DAY URL
-            if len(row) > 2 and row.iloc[2]:
-                urls["day"] = row.iloc[2]
+           # WEEK URL -> Column C
+if len(row) > 2 and row.iloc[2]:
+    urls["week"] = row.iloc[2]
 
-            # WEEK URL
-            if len(row) > 3 and row.iloc[3]:
-                urls["week"] = row.iloc[3]
+# DAY URL -> Column D
+if len(row) > 3 and row.iloc[3]:
+    urls["day"] = row.iloc[3]
 
             if urls:
                 url_map[symbol] = urls
