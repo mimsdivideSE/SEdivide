@@ -1,11 +1,10 @@
-
 name: StockEdge News Scraper
 
 on:
   workflow_dispatch:
 
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "30 3 * * *"   # Runs every day at 9:00 AM IST (3:30 AM UTC)
 
 jobs:
   scrape-news:
@@ -68,4 +67,3 @@ jobs:
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
 
         run: python -u stockedgenews.py
-
