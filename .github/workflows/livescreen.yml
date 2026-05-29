@@ -1,10 +1,10 @@
-
 name: Live Screen Bot
 
 on:
   workflow_dispatch:
 
   schedule:
+    # Runs at the 30-minute mark of every hour from 3:30 AM UTC (9:30 AM IST) to 10:30 AM UTC (4:30 PM IST), Monday to Friday
     - cron: "30 3-10 * * 1-5"
 
 concurrency:
@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 55
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Python
@@ -37,8 +37,6 @@ jobs:
           DB_NAME: ${{ secrets.DB_NAME }}
           GSPREAD_CREDENTIALS: ${{ secrets.GSPREAD_CREDENTIALS }}
           TRADINGVIEW_COOKIES: ${{ secrets.TRADINGVIEW_COOKIES }}
-
         run: |
           echo "Starting Live Screen script..."
           python livescreen.py
-
