@@ -1,4 +1,3 @@
-
 import os
 import time
 import json
@@ -251,7 +250,7 @@ def main():
                     # UPDATE TAGGED ROW
                     # ====================================================
 
-                    if tagged_row:
+                    if tenderness := tagged_row:
 
                         update_sql = f"""
                             UPDATE `{TARGET_TABLE}`
@@ -338,4 +337,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
