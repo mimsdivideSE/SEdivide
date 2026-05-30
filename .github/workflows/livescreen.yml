@@ -1,11 +1,13 @@
 name: Live Screen Scraper
 
 on:
+  # Every hour from 03:00 UTC to 11:00 UTC
+  # = 08:30 AM to 04:30 PM IST
   schedule:
-    # Runs every hour at minute 0, from 3:00 UTC to 10:00 UTC (9:30 AM to 4:30 PM IST)
-    # Adjust the hours below if your target market timezone is different!
-    - cron: '0 3-10 * * *'
-  workflow_dispatch: # Allows you to trigger the script manually from the GitHub UI
+    - cron: '0 3-11 * * *'
+
+  # Manual trigger
+  workflow_dispatch:
 
 jobs:
   scrape-charts:
@@ -19,15 +21,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-          cache: 'pip' # Caches dependencies to speed up subsequent runs
+          cache: 'pip'
 
-      - name: Install Google Chrome Browser
-        # Installs a stable, headless-compatible Chrome binary into the runner
+      - name: Install Google Chrome
         run: |
-          sudo apt-get update
-          sudo apt-get install -y wget curl unzip
-          wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
-          sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list'
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
 
@@ -38,11 +35,11 @@ jobs:
 
       - name: Execute Scraper Script
         env:
-          # Map GitHub Secrets to the Environment Variables expected by your script
           DB_HOST: ${{ secrets.DB_HOST }}
           DB_USER: ${{ secrets.DB_USER }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_NAME: ${{ secrets.DB_NAME }}
           GSPREAD_CREDENTIALS: ${{ secrets.GSPREAD_CREDENTIALS }}
           TRADINGVIEW_COOKIES: ${{ secrets.TRADINGVIEW_COOKIES }}
-        run: python your_script_name.py
+        run: |
+          python livescreen.py
