@@ -1,39 +1,35 @@
-name: Live Screen Scraper
+
+name: Live Screen Bot
 
 on:
-  # Every hour from 03:00 UTC to 11:00 UTC
-  # = 08:30 AM to 04:30 PM IST
-  schedule:
-    - cron: '0 3-11 * * *'
-
-  # Manual trigger
   workflow_dispatch:
 
+  schedule:
+    - cron: "30 3-10 * * 1-5"
+
+concurrency:
+  group: live-screen
+  cancel-in-progress: false
+
 jobs:
-  scrape-charts:
+  run-bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 55
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
-          cache: 'pip'
+          python-version: "3.10"
 
-      - name: Install Google Chrome
+      - name: Install Dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y google-chrome-stable
+          pip install selenium webdriver-manager mysql-connector-python gspread pandas pytz
 
-      - name: Install Python Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install gspread pandas mysql-connector-python selenium webdriver-manager
-
-      - name: Execute Scraper Script
+      - name: Run Script
         env:
           DB_HOST: ${{ secrets.DB_HOST }}
           DB_USER: ${{ secrets.DB_USER }}
@@ -41,5 +37,7 @@ jobs:
           DB_NAME: ${{ secrets.DB_NAME }}
           GSPREAD_CREDENTIALS: ${{ secrets.GSPREAD_CREDENTIALS }}
           TRADINGVIEW_COOKIES: ${{ secrets.TRADINGVIEW_COOKIES }}
+
         run: |
+          echo "Starting Live Screen script..."
           python livescreen.py
