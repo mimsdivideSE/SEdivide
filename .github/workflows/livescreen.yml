@@ -2,10 +2,10 @@ name: Live Screen Bot
 
 on:
   workflow_dispatch:
-
   schedule:
-    # 9:30 AM to 4:30 PM IST (Monday-Friday)
-    - cron: "0 4-11 * * 1-5"
+    # Triggering 10 minutes early to beat the queue congestion.
+    # 9:30 AM to 4:30 PM IST (Target 04:30 UTC to 11:30 UTC) -> Cron fires from 03:50 UTC to 10:50 UTC
+    - cron: "50 3-10 * * 1-5"
 
 concurrency:
   group: live-screen
@@ -17,19 +17,41 @@ jobs:
     timeout-minutes: 55
 
     steps:
+      # ================= CHECKOUT ================= #
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      # ================= PYTHON ================= #
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
 
+      # ================= DEPENDENCIES ================= #
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install selenium webdriver-manager mysql-connector-python gspread pandas pytz
 
+      # ================= PRECISION TIMING DELAY ================= #
+      - name: Wait for Exact Market Milestone Minute
+        run: |
+          # Target minute execution setup (Always execute at exactly the 30th minute of the IST hour)
+          TARGET_MINUTE=30
+          
+          while true; do
+            CURRENT_MINUTE=$(date -u +%-M)
+            
+            if [ "$CURRENT_MINUTE" -eq "$TARGET_MINUTE" ]; then
+              echo "Target time reached! Executing pipeline..."
+              break
+            fi
+            
+            echo "Current Minute: $CURRENT_MINUTE. Waiting for Minute: $TARGET_MINUTE..."
+            sleep 10
+          done
+
+      # ================= RUN SCRIPT ================= #
       - name: Run Script
         env:
           DB_HOST: ${{ secrets.DB_HOST }}
