@@ -2,24 +2,6 @@ name: Live Review Screenshot Bot
 
 on:
   workflow_dispatch:
-  schedule:
-    # Triggering ~10 minutes early to beat the top-of-the-hour queue congestion.
-    # 9:30 AM IST (Target 04:00 UTC) -> Cron fires at 03:50 UTC
-    - cron: "50 3 * * *"
-    # 10:30 AM IST (Target 05:00 UTC) -> Cron fires at 04:50 UTC
-    - cron: "50 4 * * *"
-    # 11:30 AM IST (Target 06:00 UTC) -> Cron fires at 05:50 UTC
-    - cron: "50 5 * * *"
-    # 12:30 PM IST (Target 07:00 UTC) -> Cron fires at 06:50 UTC
-    - cron: "50 6 * * *"
-    # 1:30 PM IST (Target 08:00 UTC) -> Cron fires at 07:50 UTC
-    - cron: "50 7 * * *"
-    # 2:30 PM IST (Target 09:00 UTC) -> Cron fires at 08:50 UTC
-    - cron: "50 8 * * *"
-    # 3:30 PM IST (Target 10:00 UTC) -> Cron fires at 09:50 UTC
-    - cron: "50 9 * * *"
-    # 4:30 PM IST (Target 11:00 UTC) -> Cron fires at 10:50 UTC
-    - cron: "50 10 * * *"
 
 jobs:
   live-review-bot:
