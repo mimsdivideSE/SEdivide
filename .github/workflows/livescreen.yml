@@ -3,7 +3,7 @@ name: Live Screen Bot
 on:
   workflow_dispatch:
   schedule:
-    - cron: '10 7 * * *'   # 12:40 PM IST daily
+  
 
 jobs:
   run-bot:
