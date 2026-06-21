@@ -1,4 +1,4 @@
-name: Fetch Latest 3 Transcripts
+name: Single Transcripts
 
 on:
   workflow_dispatch:
