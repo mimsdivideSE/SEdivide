@@ -1,4 +1,4 @@
-name: Single Transcripts
+name: Single Transcript
 
 on:
   workflow_dispatch:
