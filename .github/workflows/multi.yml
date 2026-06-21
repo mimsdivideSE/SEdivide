@@ -1,4 +1,4 @@
-name: Multi Channel Transcript Scraper
+name: Multi Transcript Scraper
 
 on:
   workflow_dispatch:
