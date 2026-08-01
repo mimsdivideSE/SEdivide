@@ -54,15 +54,19 @@ print("✅ MySQL Connected")
 # =========================================================
 # GET BUY + WATCHLIST SYMBOLS
 # =========================================================
-
 print("\n📥 Fetching symbols...")
 
 query = """
 SELECT DISTINCT symbol
 FROM filter
-WHERE review_status IN ('buy', 'watchlist')
+WHERE
+(
+    review_status IN ('buy', 'watchlist')
+    OR filter_type = 'D_Trigger'
+)
+AND COALESCE(depriciate, 0) = 0
 AND symbol IS NOT NULL
-AND symbol != ''
+AND TRIM(symbol) <> ''
 ORDER BY symbol ASC
 """
 
@@ -71,7 +75,6 @@ cursor.execute(query)
 stocks = cursor.fetchall()
 
 print(f"✅ Total Symbols Found: {len(stocks)}")
-
 # =========================================================
 # CHROME OPTIONS
 # =========================================================
