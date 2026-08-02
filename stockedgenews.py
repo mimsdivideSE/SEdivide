@@ -52,7 +52,7 @@ cursor = conn.cursor(dictionary=True)
 print("✅ MySQL Connected")
 
 # =========================================================
-# GET BUY + WATCHLIST SYMBOLS
+# GET BUY + WATCHLIST + ADDITIONAL FILTER SYMBOLS
 # =========================================================
 print("\n📥 Fetching symbols...")
 
@@ -62,7 +62,13 @@ FROM filter
 WHERE
 (
     review_status IN ('buy', 'watchlist')
-    OR filter_type = 'D_Trigger'
+
+    OR filter_type IN (
+        'D_Trigger',
+        'D_Trigger_S',
+        'Compact_Filter',
+        'Manual Add'
+    )
 )
 AND COALESCE(depriciate, 0) = 0
 AND symbol IS NOT NULL
