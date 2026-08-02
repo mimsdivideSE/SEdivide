@@ -52,7 +52,7 @@ cursor = conn.cursor(dictionary=True)
 print("✅ MySQL Connected")
 
 # =========================================================
-# GET BUY + WATCHLIST + ADDITIONAL FILTER SYMBOLS
+# GET BUY + WATCHLIST SYMBOLS
 # =========================================================
 print("\n📥 Fetching symbols...")
 
