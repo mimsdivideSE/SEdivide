@@ -11,8 +11,8 @@ on:
       - '.github/workflows/multi.yml'
 
   schedule:
-    # Runs every 5 hours, every day
-    - cron: '0 */5 * * *'
+    # Runs daily at 2:00 PM UTC
+    - cron: '0 14 * * *'
 
 jobs:
   scrape:
